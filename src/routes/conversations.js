@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../db/mysql';
+import { createConversation, listConversations } from '../services/conversations';
 
 export const conversationsRouter = express.Router();
 
@@ -7,46 +7,14 @@ conversationsRouter.get('/', async (req, res) => {
   const userId = Number(req.query.userId);
   if (!userId) return res.status(400).json({ error: 'userId is required' });
 
-  const [conversations] = await pool.query(
-    `SELECT c.id, c.title
-     FROM conversations c
-     JOIN conversation_participants p ON p.conversation_id = c.id
-     WHERE p.user_id = ?
-     ORDER BY c.id ASC`,
-    [userId]
-  );
-
-  const result = [];
-  for (const c of conversations) {
-    const [[last]] = await pool.query(
-      `SELECT id, sender_id AS senderId, created_at AS createdAt
-       FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1`,
-      [c.id]
-    );
-    const [[counted]] = await pool.query(
-      'SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ?',
-      [c.id]
-    );
-    result.push({ ...c, lastMessage: last || null, messageCount: counted.count });
-  }
-
-  res.json(result);
+  res.json(await listConversations(userId));
 });
 
 conversationsRouter.post('/', async (req, res) => {
   const { title, participantIds } = req.body || {};
-  if (!title || !Array.isArray(participantIds) || participantIds.length === 0) {
+  if (!title || !Array.isArray(participantIds) || !participantIds.length) {
     return res.status(400).json({ error: 'title and a non-empty participantIds[] are required' });
   }
 
-  const [created] = await pool.execute('INSERT INTO conversations (title) VALUES (?)', [title]);
-  const id = created.insertId;
-  for (const uid of participantIds) {
-    await pool.execute(
-      'INSERT INTO conversation_participants (conversation_id, user_id) VALUES (?, ?)',
-      [id, Number(uid)]
-    );
-  }
-
-  res.status(201).json({ id, title, participantIds: participantIds.map(Number) });
+  res.status(201).json(await createConversation(title, participantIds.map(Number)));
 });

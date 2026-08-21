@@ -14,7 +14,7 @@ class MongooseMessageBodyRepository implements MessageBodyRepository {
   }
 
   async findByIds(ids: readonly number[]): Promise<MessageBodyContent[]> {
-    if (ids.length === 0) return [];
+    if (!ids.length) return [];
 
     return MessageBodyModel.find({ _id: { $in: ids } })
       .select({ _id: 1, body: 1 })
@@ -23,7 +23,7 @@ class MongooseMessageBodyRepository implements MessageBodyRepository {
   }
 
   async ensureSeeded(messages: readonly MessageBody[]): Promise<void> {
-    if (messages.length === 0) return;
+    if (!messages.length) return;
 
     await MessageBodyModel.bulkWrite(
       messages.map(message => ({

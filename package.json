@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts",
-    "seed": "tsx docker/db/seed.ts",
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "db:migrate": "tsx docker/db/run-migrations.ts",
+    "db:seed": "tsx docker/db/seed.ts",
+    "seed": "npm run db:seed",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -17,6 +19,8 @@
     "express": "^4.19.2",
     "mongoose": "^9.9.3",
     "mysql2": "^3.11.3",
+    "sequelize": "^6.37.8",
+    "umzug": "^3.8.3",
     "ws": "^8.18.0"
   },
   "devDependencies": {

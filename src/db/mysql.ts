@@ -1,18 +1,35 @@
-import mysql from 'mysql2/promise';
+import { Sequelize } from 'sequelize';
 import { config } from '../config';
+import { initializeSqlModels } from '../models/sql';
 
-export const pool = mysql.createPool(config.mysqlUrl);
+const retryDelayMs = 1500;
 
-export async function waitForMysql(retries = 40): Promise<void> {
-  let lastErr: unknown;
-  for (let i = 0; i < retries; i++) {
+export const sequelize = new Sequelize(config.mysqlUrl, {
+  dialect: 'mysql',
+  logging: false
+});
+
+initializeSqlModels(sequelize);
+
+export async function connectMysql(retries = 40): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      await pool.query('SELECT 1');
+      await sequelize.authenticate();
       return;
-    } catch (err) {
-      lastErr = err;
-      await new Promise(r => setTimeout(r, 1500));
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+      }
     }
   }
-  throw new Error(`mysql not reachable: ${lastErr}`);
+
+  throw new Error('mysql not reachable', { cause: lastError });
+}
+
+export async function disconnectMysql(): Promise<void> {
+  await sequelize.close();
 }
