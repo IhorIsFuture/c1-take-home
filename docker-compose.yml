@@ -58,4 +58,4 @@ services:
 
   redis:
     image: redis:7
-    expose: ['6379']
+    ports: ['127.0.0.1:6379:6379']

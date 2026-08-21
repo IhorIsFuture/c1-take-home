@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { pool } from '../db/mysql';
-import { mongo } from '../db/mongo';
+import { messageBodyRepository } from '../repositories/message-body-repository';
 
 export interface NewMessage {
   conversationId: number;
@@ -21,16 +21,14 @@ export async function createMessage(input: NewMessage) {
   const id = (res as { insertId: number }).insertId;
 
   const createdAt = new Date();
-  await mongo()
-    .collection('message_bodies')
-    .insertOne({
-      _id: id as never,
-      conversationId,
-      senderId,
-      body,
-      signature,
-      createdAt
-    });
+  await messageBodyRepository.create({
+    _id: id,
+    conversationId,
+    senderId,
+    body,
+    signature,
+    createdAt
+  });
 
   return { id, conversationId, senderId, body, createdAt };
 }

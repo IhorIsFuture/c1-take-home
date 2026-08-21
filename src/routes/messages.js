@@ -1,7 +1,7 @@
 import express from 'express';
 import { createMessage } from '../services/messages';
 import { pool } from '../db/mysql';
-import { mongo } from '../db/mongo';
+import { messageBodyRepository } from '../repositories/message-body-repository';
 import { broadcast } from '../ws/hub';
 
 export const messagesRouter = express.Router();
@@ -34,12 +34,7 @@ messagesRouter.get('/', async (req, res) => {
   );
 
   const ids = rows.map(r => r.id);
-  const bodies = ids.length
-    ? await mongo()
-        .collection('message_bodies')
-        .find({ _id: { $in: ids } })
-        .toArray()
-    : [];
+  const bodies = await messageBodyRepository.findByIds(ids);
   const bodyById = new Map(bodies.map(b => [b._id, b.body]));
 
   res.json(rows.map(r => ({ ...r, body: bodyById.get(r.id) ?? '' })));

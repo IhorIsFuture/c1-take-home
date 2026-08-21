@@ -1,30 +1,35 @@
-import { connectMongo, mongo } from '../../src/db/mongo';
+import { connectMongo, disconnectMongo } from '../../src/db/mongo';
+import type { MessageBody } from '../../src/models/message-body';
+import { messageBodyRepository } from '../../src/repositories/message-body-repository';
 
-await connectMongo();
-const bodies = mongo().collection('message_bodies');
-await bodies.deleteMany({});
-await bodies.insertMany([
+const demoBodies: MessageBody[] = [
   {
-    _id: 1 as never,
+    _id: 1,
     conversationId: 1,
     senderId: 2,
     body: 'Hi, any update on order #1042?',
     createdAt: new Date()
   },
   {
-    _id: 2 as never,
+    _id: 2,
     conversationId: 1,
     senderId: 1,
     body: 'Checking now — give me a minute.',
     createdAt: new Date()
   },
   {
-    _id: 3 as never,
+    _id: 3,
     conversationId: 2,
     senderId: 3,
     body: 'Notes from the design sync are in the doc.',
     createdAt: new Date()
   }
-]);
-console.log('seeded message bodies');
-process.exit(0);
+];
+
+try {
+  await connectMongo();
+  await messageBodyRepository.ensureSeeded(demoBodies);
+  console.log('ensured demo message bodies exist');
+} finally {
+  await disconnectMongo();
+}
