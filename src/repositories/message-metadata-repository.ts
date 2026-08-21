@@ -14,21 +14,42 @@ export interface MessageMetadata {
   createdAt: Date;
 }
 
+export interface MessageMetadataWriteResult {
+  metadata: MessageMetadata;
+  created: boolean;
+}
+
 export interface MessageMetadataRepository {
-  create(input: NewMessageMetadata): Promise<MessageMetadata>;
+  createOrFind(input: NewMessageMetadata): Promise<MessageMetadataWriteResult>;
   listByConversationId(conversationId: number): Promise<MessageMetadata[]>;
 }
 
-class SequelizeMessageMetadataRepository implements MessageMetadataRepository {
-  async create(input: NewMessageMetadata): Promise<MessageMetadata> {
-    const message = await Message.create(input);
+function toMessageMetadata(message: Message): MessageMetadata {
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    senderId: message.senderId,
+    createdAt: message.createdAt
+  };
+}
 
-    return {
-      id: message.id,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      createdAt: message.createdAt
-    };
+class SequelizeMessageMetadataRepository implements MessageMetadataRepository {
+  async createOrFind(input: NewMessageMetadata): Promise<MessageMetadataWriteResult> {
+    if (!input.clientId) {
+      const message = await Message.create(input);
+      return { metadata: toMessageMetadata(message), created: true };
+    }
+
+    const [message, created] = await Message.findOrCreate({
+      where: {
+        conversationId: input.conversationId,
+        senderId: input.senderId,
+        clientId: input.clientId
+      },
+      defaults: input
+    });
+
+    return { metadata: toMessageMetadata(message), created };
   }
 
   async listByConversationId(conversationId: number): Promise<MessageMetadata[]> {
