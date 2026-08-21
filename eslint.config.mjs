@@ -29,7 +29,17 @@ export default tseslint.config(
     rules: {
       eqeqeq: ['error', 'always'],
       'no-var': 'error',
-      'prefer-const': 'error'
+      'prefer-const': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          args: 'all',
+          argsIgnorePattern: '^_',
+          caughtErrors: 'all',
+          caughtErrorsIgnorePattern: '^_',
+          reportUsedIgnorePattern: true
+        }
+      ]
     }
   },
   eslintConfigPrettier
