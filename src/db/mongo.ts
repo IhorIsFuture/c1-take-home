@@ -1,5 +1,5 @@
 import { MongoClient, type Db } from 'mongodb';
-import { config } from '../config.ts';
+import { config } from '../config';
 
 const client = new MongoClient(config.mongoUrl);
 let db: Db | undefined;
@@ -11,7 +11,7 @@ export async function connectMongo(retries = 20): Promise<Db> {
       db = client.db();
       return db;
     } catch {
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 1500));
     }
   }
   throw new Error('mongo not reachable');

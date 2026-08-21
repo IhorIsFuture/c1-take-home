@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../db/mysql.ts';
+import { pool } from '../db/mysql';
 
 export const conversationsRouter = express.Router();
 
@@ -13,7 +13,7 @@ conversationsRouter.get('/', async (req, res) => {
      JOIN conversation_participants p ON p.conversation_id = c.id
      WHERE p.user_id = ?
      ORDER BY c.id ASC`,
-    [userId],
+    [userId]
   );
 
   const result = [];
@@ -21,11 +21,11 @@ conversationsRouter.get('/', async (req, res) => {
     const [[last]] = await pool.query(
       `SELECT id, sender_id AS senderId, created_at AS createdAt
        FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1`,
-      [c.id],
+      [c.id]
     );
     const [[counted]] = await pool.query(
       'SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ?',
-      [c.id],
+      [c.id]
     );
     result.push({ ...c, lastMessage: last || null, messageCount: counted.count });
   }
@@ -44,7 +44,7 @@ conversationsRouter.post('/', async (req, res) => {
   for (const uid of participantIds) {
     await pool.execute(
       'INSERT INTO conversation_participants (conversation_id, user_id) VALUES (?, ?)',
-      [id, Number(uid)],
+      [id, Number(uid)]
     );
   }
 

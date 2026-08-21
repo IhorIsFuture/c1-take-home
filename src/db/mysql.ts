@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { config } from '../config.ts';
+import { config } from '../config';
 
 export const pool = mysql.createPool(config.mysqlUrl);
 
@@ -11,7 +11,7 @@ export async function waitForMysql(retries = 40): Promise<void> {
       return;
     } catch (err) {
       lastErr = err;
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 1500));
     }
   }
   throw new Error(`mysql not reachable: ${lastErr}`);
