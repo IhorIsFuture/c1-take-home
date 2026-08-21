@@ -1,7 +1,7 @@
 import http from 'node:http';
 import express from 'express';
 import { config } from './config';
-import { waitForMysql } from './db/mysql';
+import { connectMysql } from './db/mysql';
 import { connectMongo } from './db/mongo';
 import { conversationsRouter } from './routes/conversations.js';
 import { messagesRouter } from './routes/messages.js';
@@ -18,7 +18,7 @@ app.use('/api/search', searchRouter);
 const server = http.createServer(app);
 attachWs(server);
 
-await waitForMysql();
+await connectMysql();
 await connectMongo();
 
 server.listen(config.port, () => {

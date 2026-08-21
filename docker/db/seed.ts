@@ -1,30 +1,26 @@
-import { connectMongo, mongo } from '../../src/db/mongo';
+import { connectMongo, disconnectMongo } from '../../src/db/mongo';
+import { connectMysql, disconnectMysql } from '../../src/db/mysql';
+import { messageBodyRepository } from '../../src/repositories/message-body-repository';
+import { demoMessageBodies } from './fixtures';
+import { mysqlSeeder } from './migrator';
 
-await connectMongo();
-const bodies = mongo().collection('message_bodies');
-await bodies.deleteMany({});
-await bodies.insertMany([
-  {
-    _id: 1 as never,
-    conversationId: 1,
-    senderId: 2,
-    body: 'Hi, any update on order #1042?',
-    createdAt: new Date()
-  },
-  {
-    _id: 2 as never,
-    conversationId: 1,
-    senderId: 1,
-    body: 'Checking now — give me a minute.',
-    createdAt: new Date()
-  },
-  {
-    _id: 3 as never,
-    conversationId: 2,
-    senderId: 3,
-    body: 'Notes from the design sync are in the doc.',
-    createdAt: new Date()
+try {
+  await connectMysql();
+  const applied = await mysqlSeeder.up();
+
+  if (!applied.length) {
+    console.log('MySQL seeds are already up to date');
+  } else {
+    console.log(`applied MySQL seeds: ${applied.map(seed => seed.name).join(', ')}`);
   }
-]);
-console.log('seeded message bodies');
-process.exit(0);
+} finally {
+  await disconnectMysql();
+}
+
+try {
+  await connectMongo();
+  await messageBodyRepository.ensureSeeded(demoMessageBodies);
+  console.log('ensured demo message bodies exist');
+} finally {
+  await disconnectMongo();
+}

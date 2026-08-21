@@ -1,0 +1,5 @@
+Progress:
+1. Review project and setup prettier and eslint. Fix all problems which were founded by this tools.
+2. Replaced usage of mongo from MongoDB to Mongoose.
+3. Replaced usage of myssql from mysql2/promise to Sequelize. Made more stable setup migrations and seeds.
+4.

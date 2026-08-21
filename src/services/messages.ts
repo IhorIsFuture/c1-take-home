@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
-import { pool } from '../db/mysql';
-import { mongo } from '../db/mongo';
+import { messageBodyRepository } from '../repositories/message-body-repository';
+import { messageMetadataRepository } from '../repositories/message-metadata-repository';
+import { broadcast } from '../ws/hub';
 
 export interface NewMessage {
   conversationId: number;
@@ -13,24 +14,37 @@ export async function createMessage(input: NewMessage) {
   const { conversationId, senderId, body, clientId } = input;
 
   const signature = crypto.pbkdf2Sync(body, 'relay-signing', 200000, 32, 'sha256').toString('hex');
-
-  const [res] = await pool.execute(
-    'INSERT INTO messages (conversation_id, sender_id, client_id) VALUES (?, ?, ?)',
-    [conversationId, senderId, clientId]
-  );
-  const id = (res as { insertId: number }).insertId;
-
   const createdAt = new Date();
-  await mongo()
-    .collection('message_bodies')
-    .insertOne({
-      _id: id as never,
-      conversationId,
-      senderId,
-      body,
-      signature,
-      createdAt
-    });
 
-  return { id, conversationId, senderId, body, createdAt };
+  const metadata = await messageMetadataRepository.create({
+    conversationId,
+    senderId,
+    clientId,
+    createdAt
+  });
+
+  await messageBodyRepository.create({
+    _id: metadata.id,
+    conversationId,
+    senderId,
+    body,
+    signature,
+    createdAt
+  });
+
+  const message = { id: metadata.id, conversationId, senderId, body, createdAt };
+  broadcast(conversationId, { type: 'message', ...message });
+
+  return message;
+}
+
+export async function listMessages(conversationId: number) {
+  const messages = await messageMetadataRepository.listByConversationId(conversationId);
+  const bodies = await messageBodyRepository.findByIds(messages.map(message => message.id));
+  const bodyById = new Map(bodies.map(body => [body._id, body.body]));
+
+  return messages.map(message => ({
+    ...message,
+    body: bodyById.get(message.id) ?? ''
+  }));
 }

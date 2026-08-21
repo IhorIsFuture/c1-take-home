@@ -1,23 +1,32 @@
-import { MongoClient, type Db } from 'mongodb';
+import mongoose from 'mongoose';
 import { config } from '../config';
 
-const client = new MongoClient(config.mongoUrl);
-let db: Db | undefined;
+const retryDelayMs = 1500;
 
-export async function connectMongo(retries = 20): Promise<Db> {
-  for (let i = 0; i < retries; i++) {
+export async function connectMongo(retries = 20): Promise<void> {
+  if (mongoose.connection.readyState === 1) return;
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      await client.connect();
-      db = client.db();
-      return db;
-    } catch {
-      await new Promise(r => setTimeout(r, 1500));
+      await mongoose.connect(config.mongoUrl, {
+        serverSelectionTimeoutMS: retryDelayMs
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      await mongoose.disconnect().catch(() => undefined);
+
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+      }
     }
   }
-  throw new Error('mongo not reachable');
+
+  throw new Error('mongo not reachable', { cause: lastError });
 }
 
-export function mongo(): Db {
-  if (!db) throw new Error('mongo not connected');
-  return db;
+export async function disconnectMongo(): Promise<void> {
+  await mongoose.disconnect();
 }
