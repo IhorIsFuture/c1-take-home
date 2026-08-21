@@ -1,7 +1,7 @@
 services:
   envoy:
     image: envoyproxy/envoy:v1.31-latest
-    ports: ["3000:3000"]
+    ports: ['3000:3000']
     volumes:
       - ./docker/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
     depends_on: [api]
@@ -13,7 +13,7 @@ services:
     command: npm start
     restart: on-failure
     env_file: .env
-    expose: ["3000"]
+    expose: ['3000']
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -26,7 +26,7 @@ services:
       context: .
       dockerfile: docker/app/Dockerfile
     command: npm run seed
-    restart: "no"
+    restart: 'no'
     env_file: .env
     volumes:
       - ./:/app
@@ -42,11 +42,11 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: relay
-    ports: ["3306:3306"]
+    ports: ['3306:3306']
     volumes:
       - ./docker/db/mysql.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-proot']
       interval: 5s
       timeout: 5s
       retries: 20
@@ -54,8 +54,8 @@ services:
 
   mongo:
     image: mongo:7
-    ports: ["27017:27017"]
+    ports: ['27017:27017']
 
   redis:
     image: redis:7
-    expose: ["6379"]
+    expose: ['6379']

@@ -10,7 +10,7 @@ export function attachWs(server: Server): void {
   wss.on('connection', (ws: Client) => {
     ws.subs = new Set();
     clients.add(ws);
-    ws.on('message', (raw) => {
+    ws.on('message', raw => {
       try {
         const m = JSON.parse(raw.toString());
         if (m.type === 'subscribe' && Array.isArray(m.conversationIds)) {

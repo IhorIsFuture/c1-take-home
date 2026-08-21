@@ -1,8 +1,8 @@
 import express from 'express';
-import { createMessage } from '../services/messages.ts';
-import { pool } from '../db/mysql.ts';
-import { mongo } from '../db/mongo.ts';
-import { broadcast } from '../ws/hub.ts';
+import { createMessage } from '../services/messages';
+import { pool } from '../db/mysql';
+import { mongo } from '../db/mongo';
+import { broadcast } from '../ws/hub';
 
 export const messagesRouter = express.Router();
 
@@ -16,7 +16,7 @@ messagesRouter.post('/', async (req, res) => {
     conversationId: Number(conversationId),
     senderId: Number(senderId),
     body: String(body),
-    clientId: clientId ?? null,
+    clientId: clientId ?? null
   });
 
   broadcast(msg.conversationId, { type: 'message', ...msg });
@@ -30,14 +30,17 @@ messagesRouter.get('/', async (req, res) => {
   const [rows] = await pool.query(
     `SELECT id, conversation_id AS conversationId, sender_id AS senderId, created_at AS createdAt
      FROM messages WHERE conversation_id = ? ORDER BY id ASC`,
-    [conversationId],
+    [conversationId]
   );
 
-  const ids = rows.map((r) => r.id);
+  const ids = rows.map(r => r.id);
   const bodies = ids.length
-    ? await mongo().collection('message_bodies').find({ _id: { $in: ids } }).toArray()
+    ? await mongo()
+        .collection('message_bodies')
+        .find({ _id: { $in: ids } })
+        .toArray()
     : [];
-  const bodyById = new Map(bodies.map((b) => [b._id, b.body]));
+  const bodyById = new Map(bodies.map(b => [b._id, b.body]));
 
-  res.json(rows.map((r) => ({ ...r, body: bodyById.get(r.id) ?? '' })));
+  res.json(rows.map(r => ({ ...r, body: bodyById.get(r.id) ?? '' })));
 });
