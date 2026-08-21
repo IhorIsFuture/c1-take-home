@@ -3,6 +3,7 @@ import express from 'express';
 import { config } from './config';
 import { connectMysql } from './db/mysql';
 import { connectMongo } from './db/mongo';
+import { errorHandler } from './http/error-handler';
 import { conversationsRouter } from './routes/conversations.js';
 import { messagesRouter } from './routes/messages.js';
 import { searchRouter } from './routes/search.js';
@@ -14,6 +15,7 @@ app.use(express.static('web'));
 app.use('/api/conversations', conversationsRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/search', searchRouter);
+app.use(errorHandler);
 
 const server = http.createServer(app);
 attachWs(server);
