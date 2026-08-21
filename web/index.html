@@ -3,117 +3,187 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#176b50" />
     <title>Relay</title>
-    <style>
-      body {
-        font:
-          15px/1.4 system-ui,
-          sans-serif;
-        margin: 0;
-        display: flex;
-        height: 100vh;
-      }
-      #sidebar {
-        width: 280px;
-        border-right: 1px solid #ddd;
-        overflow-y: auto;
-      }
-      #sidebar header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px;
-      }
-      #sidebar h2 {
-        font-size: 13px;
-        text-transform: uppercase;
-        color: #888;
-        margin: 0;
-      }
-      #newConv {
-        font-size: 13px;
-        cursor: pointer;
-      }
-      #conversations {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-      }
-      #conversations li {
-        padding: 12px;
-        cursor: pointer;
-        border-bottom: 1px solid #f0f0f0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      #conversations li:hover {
-        background: #f6f6f6;
-      }
-      #conversations li.active {
-        background: #eef4ff;
-      }
-      .dot {
-        color: #e5484d;
-        font-size: 12px;
-      }
-      #main {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-      }
-      #title {
-        padding: 12px;
-        margin: 0;
-        border-bottom: 1px solid #ddd;
-      }
-      #messages {
-        flex: 1;
-        overflow-y: auto;
-        padding: 12px;
-      }
-      .msg {
-        padding: 6px 0;
-      }
-      #composer {
-        display: flex;
-        border-top: 1px solid #ddd;
-        padding: 8px;
-        gap: 8px;
-      }
-      #text {
-        flex: 1;
-        padding: 8px;
-      }
-      #searchForm {
-        padding: 0 12px 12px;
-      }
-      #search {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 6px 8px;
-      }
-    </style>
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div id="sidebar">
-      <header>
-        <h2>Conversations</h2>
-        <button id="newConv">+ New</button>
-      </header>
-      <form id="searchForm">
-        <input id="search" autocomplete="off" placeholder="Search messages…" />
+    <main id="app" class="app-shell">
+      <aside id="sidebar" class="sidebar" aria-label="Conversations">
+        <header class="sidebar-header">
+          <a class="brand" href="/" aria-label="Relay home">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="img">
+                <path d="m4.5 12 14-7-4.2 14-3.1-5.8L4.5 12Z" />
+                <path d="m11.2 13.2 7.3-8.2" />
+              </svg>
+            </span>
+            <span>
+              <strong>Relay</strong>
+              <small>Simple conversations</small>
+            </span>
+          </a>
+          <button
+            id="newConv"
+            class="icon-button icon-button-accent"
+            type="button"
+            aria-label="New conversation"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        </header>
+
+        <section class="profile-card" aria-label="Current user">
+          <div class="avatar avatar-user">U1</div>
+          <div class="profile-copy">
+            <strong>User #1</strong>
+            <span><i class="presence-dot"></i> Available</span>
+          </div>
+          <span id="connectionPill" class="connection-pill" data-status="connecting"
+            >Connecting</span
+          >
+        </section>
+
+        <form id="searchForm" class="search-form" role="search">
+          <label class="visually-hidden" for="search">Search messages</label>
+          <button class="search-submit" type="submit" aria-label="Search messages">
+            <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5" />
+              <path d="m16 16 4 4" />
+            </svg>
+          </button>
+          <input id="search" type="search" autocomplete="off" placeholder="Search messages" />
+          <button
+            id="clearSearch"
+            class="clear-search"
+            type="button"
+            aria-label="Clear search"
+            hidden
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8 8 8 8M16 8l-8 8" />
+            </svg>
+          </button>
+          <kbd>⌘ K</kbd>
+        </form>
+
+        <div class="section-heading">
+          <span>Messages</span>
+          <span id="conversationTotal">0 conversations</span>
+        </div>
+
+        <div id="conversationListState" class="conversation-list-state" aria-live="polite"></div>
+        <ul id="conversations" class="conversation-list"></ul>
+      </aside>
+
+      <section id="main" class="chat-panel" aria-label="Chat">
+        <header class="chat-header">
+          <button
+            id="backButton"
+            class="icon-button back-button"
+            type="button"
+            aria-label="Back to conversations"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+          <div id="chatAvatar" class="avatar chat-avatar" aria-hidden="true">R</div>
+          <div class="chat-heading">
+            <h1 id="title">Welcome to Relay</h1>
+            <p id="chatStatus">Choose a conversation to start</p>
+          </div>
+          <div id="chatConnectionBadge" class="realtime-badge" data-status="connecting">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 9a10 10 0 0 1 14 0M8 12a6 6 0 0 1 8 0" />
+              <path d="M12 16h.01" />
+            </svg>
+            <span id="chatConnectionLabel">Connecting</span>
+          </div>
+        </header>
+
+        <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions">
+          <section class="empty-state">
+            <div class="empty-illustration" aria-hidden="true">
+              <span class="empty-orbit"></span>
+              <span class="empty-mark">
+                <svg viewBox="0 0 24 24">
+                  <path d="m4.5 12 14-7-4.2 14-3.1-5.8L4.5 12Z" />
+                  <path d="m11.2 13.2 7.3-8.2" />
+                </svg>
+              </span>
+            </div>
+            <p class="eyebrow">Your conversations, in sync</p>
+            <h2>Stay close to what matters</h2>
+            <p>Select a conversation from the sidebar or start a new one.</p>
+          </section>
+        </div>
+
+        <form id="composer" class="composer">
+          <div class="composer-shell">
+            <label class="visually-hidden" for="text">Write a message</label>
+            <textarea
+              id="text"
+              rows="1"
+              maxlength="4000"
+              autocomplete="off"
+              placeholder="Choose a conversation first"
+              disabled
+            ></textarea>
+            <button
+              id="sendButton"
+              class="send-button"
+              type="submit"
+              aria-label="Send message"
+              disabled
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m4.5 12 14-7-4.2 14-3.1-5.8L4.5 12Z" />
+                <path d="m11.2 13.2 7.3-8.2" />
+              </svg>
+            </button>
+          </div>
+          <p class="composer-hint">Enter to send · Shift + Enter for a new line</p>
+        </form>
+      </section>
+    </main>
+
+    <dialog id="newConversationDialog" class="conversation-dialog">
+      <form id="newConversationForm" method="dialog">
+        <div class="dialog-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </div>
+        <div class="dialog-heading">
+          <p class="eyebrow">New conversation</p>
+          <h2>Create a space to talk</h2>
+          <p>User #1 and User #2 will be added as participants.</p>
+        </div>
+        <label for="conversationTitle">Conversation title</label>
+        <input
+          id="conversationTitle"
+          name="title"
+          maxlength="200"
+          autocomplete="off"
+          placeholder="e.g. Product launch"
+          required
+        />
+        <div class="dialog-actions">
+          <button id="cancelConversation" class="button button-secondary" type="button">
+            Cancel
+          </button>
+          <button id="createConversation" class="button button-primary" type="submit">
+            Create conversation
+          </button>
+        </div>
       </form>
-      <ul id="conversations"></ul>
-    </div>
-    <div id="main">
-      <h3 id="title">Pick a conversation</h3>
-      <div id="messages"></div>
-      <form id="composer">
-        <input id="text" autocomplete="off" placeholder="Message…" />
-        <button>Send</button>
-      </form>
-    </div>
-    <script src="/app.js"></script>
+    </dialog>
+
+    <div id="toastRegion" class="toast-region" aria-live="assertive"></div>
+
+    <script type="module" src="/app.js"></script>
   </body>
 </html>
