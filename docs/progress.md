@@ -10,3 +10,5 @@ Progress:
 9. Refactoring the base functionality of the application before tests.
 10. body-hash-not-null migration and remove code
 11. Prepare the environment for integration and load-performance testing
+12. Create integration tests for the application
+13. 

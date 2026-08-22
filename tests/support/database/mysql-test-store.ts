@@ -35,6 +35,15 @@ interface StoredConversationRow extends RowDataPacket {
   createdAt: Date;
 }
 
+interface StoredMessageRow extends RowDataPacket {
+  id: number;
+  conversationId: number;
+  senderId: number;
+  clientId: string | null;
+  bodyHash: string;
+  createdAt: Date;
+}
+
 export interface StoredUser {
   id: number;
   name: string;
@@ -58,6 +67,15 @@ export interface StoredConversation {
   createdByUserId: number;
   clientId: string;
   title: string;
+  createdAt: Date;
+}
+
+export interface StoredMessage {
+  id: number;
+  conversationId: number;
+  senderId: number;
+  clientId: string | null;
+  bodyHash: string;
   createdAt: Date;
 }
 
@@ -144,6 +162,36 @@ export async function listStoredParticipantIds(conversationId: number): Promise<
   );
 
   return rows.map(row => row.userId);
+}
+
+export async function findStoredMessage(
+  conversationId: number,
+  senderId: number,
+  clientId: string
+): Promise<StoredMessage | null> {
+  const [rows] = await getPool().query<StoredMessageRow[]>(
+    'SELECT id, conversation_id AS conversationId, sender_id AS senderId, client_id AS clientId, body_hash AS bodyHash, created_at AS createdAt FROM messages WHERE conversation_id = ? AND sender_id = ? AND client_id = ? LIMIT 1',
+    [conversationId, senderId, clientId]
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function listStoredMessages(conversationId: number): Promise<StoredMessage[]> {
+  const [rows] = await getPool().query<StoredMessageRow[]>(
+    'SELECT id, conversation_id AS conversationId, sender_id AS senderId, client_id AS clientId, body_hash AS bodyHash, created_at AS createdAt FROM messages WHERE conversation_id = ? ORDER BY id ASC',
+    [conversationId]
+  );
+
+  return rows;
+}
+
+export async function countStoredMessages(): Promise<number> {
+  const [rows] = await getPool().query<(RowDataPacket & { count: number })[]>(
+    'SELECT COUNT(*) AS count FROM messages'
+  );
+
+  return rows[0]?.count ?? 0;
 }
 
 export async function closeMysqlTestStore(): Promise<void> {

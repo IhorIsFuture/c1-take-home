@@ -4,4 +4,5 @@ coverage/
 .idea/
 .env
 .DS_Store
+performance/results/*.json
 **/*.md
