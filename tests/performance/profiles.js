@@ -1,19 +1,49 @@
-const endpointThresholds = latency => ({
-  'http_req_duration{endpoint:conversation_list}': [`p(95)<${latency.conversationList}`],
-  'http_req_duration{endpoint:message_list}': [`p(95)<${latency.messageList}`],
-  'http_req_duration{endpoint:user_search}': [`p(95)<${latency.userSearch}`],
-  'http_req_duration{endpoint:message_create}': [`p(95)<${latency.messageCreate}`]
-});
+const endpointNames = ['conversation_list', 'message_list', 'user_search', 'message_create'];
+
+function taggedMetric(metric, tags) {
+  const selector = Object.entries(tags)
+    .map(([name, value]) => `${name}:${value}`)
+    .join(',');
+
+  return `${metric}{${selector}}`;
+}
+
+function endpointThresholds(phase, latency) {
+  return Object.fromEntries(
+    endpointNames.map(endpoint => [
+      taggedMetric('http_req_duration', { endpoint, phase }),
+      [`p(95)<${latency[endpoint]}`]
+    ])
+  );
+}
+
+function reliabilityThresholds({ phase, checks, failures, latency, droppedIterations = false }) {
+  return {
+    [taggedMetric('checks', { phase })]: [checks],
+    [taggedMetric('http_reqs', { phase })]: ['count>0'],
+    [taggedMetric('http_req_failed', { phase })]: [failures],
+    [taggedMetric('http_req_duration', { phase })]: [`p(95)<${latency}`],
+    ...(droppedIterations ? { [taggedMetric('dropped_iterations', { phase })]: ['count==0'] } : {})
+  };
+}
 
 const smokeScenario = exec => ({
   executor: 'shared-iterations',
   exec,
   vus: 1,
   iterations: 1,
-  maxDuration: '30s'
+  maxDuration: '30s',
+  tags: { phase: 'measured' }
 });
 
-const constantArrivalScenario = (exec, rate, duration, preAllocatedVUs, maxVUs) => ({
+const constantArrivalScenario = (
+  exec,
+  rate,
+  duration,
+  preAllocatedVUs,
+  maxVUs,
+  phase = 'measured'
+) => ({
   executor: 'constant-arrival-rate',
   exec,
   rate,
@@ -21,7 +51,8 @@ const constantArrivalScenario = (exec, rate, duration, preAllocatedVUs, maxVUs) 
   duration,
   preAllocatedVUs,
   maxVUs,
-  gracefulStop: '10s'
+  gracefulStop: '10s',
+  tags: { phase }
 });
 
 const stressScenario = (exec, startRate, targets, preAllocatedVUs, maxVUs) => ({
@@ -37,12 +68,48 @@ const stressScenario = (exec, startRate, targets, preAllocatedVUs, maxVUs) => ({
     { target: targets[2], duration: '20s' },
     { target: 0, duration: '10s' }
   ],
-  gracefulStop: '15s'
+  gracefulStop: '15s',
+  tags: { phase: 'measured' }
 });
 
+const warmupScenarios = {
+  conversation_list: constantArrivalScenario('listConversations', 2, '15s', 4, 12, 'warmup'),
+  message_list: constantArrivalScenario('listMessages', 4, '15s', 6, 20, 'warmup'),
+  user_search: constantArrivalScenario('searchUsers', 2, '15s', 4, 12, 'warmup'),
+  message_create: constantArrivalScenario('createMessage', 2, '15s', 4, 12, 'warmup')
+};
+
+const steadyStatePreconditioning = {
+  profile: 'warmup',
+  settleDelayMs: 2_000,
+  scenarios: warmupScenarios
+};
+
 export const performanceProfiles = {
+  warmup: {
+    description: 'Deterministic preconditioning excluded from persisted performance results',
+    metricPhase: 'warmup',
+    persistResult: false,
+    scenarios: warmupScenarios,
+    thresholds: {
+      ...reliabilityThresholds({
+        phase: 'warmup',
+        checks: 'rate==1',
+        failures: 'rate==0',
+        latency: 30_000,
+        droppedIterations: true
+      }),
+      ...endpointThresholds('warmup', {
+        conversation_list: 30_000,
+        message_list: 30_000,
+        user_search: 30_000,
+        message_create: 30_000
+      })
+    }
+  },
   smoke: {
     description: 'One correctness iteration for every HTTP workload',
+    metricPhase: 'measured',
     scenarios: {
       conversation_list: smokeScenario('listConversations'),
       message_list: smokeScenario('listMessages'),
@@ -50,33 +117,50 @@ export const performanceProfiles = {
       message_create: smokeScenario('createMessage')
     },
     thresholds: {
-      checks: ['rate==1'],
-      http_req_failed: ['rate==0']
+      ...reliabilityThresholds({
+        phase: 'measured',
+        checks: 'rate==1',
+        failures: 'rate==0',
+        latency: 30_000
+      }),
+      ...endpointThresholds('measured', {
+        conversation_list: 30_000,
+        message_list: 30_000,
+        user_search: 30_000,
+        message_create: 30_000
+      })
     }
   },
   baseline: {
     description: 'Low constant arrival rate used as the before-optimization baseline',
+    metricPhase: 'measured',
+    preconditioning: steadyStatePreconditioning,
     scenarios: {
-      conversation_list: constantArrivalScenario('listConversations', 2, '30s', 4, 12),
-      message_list: constantArrivalScenario('listMessages', 4, '30s', 6, 20),
-      user_search: constantArrivalScenario('searchUsers', 2, '30s', 4, 12),
-      message_create: constantArrivalScenario('createMessage', 1, '30s', 4, 12)
+      conversation_list: constantArrivalScenario('listConversations', 2, '120s', 4, 12),
+      message_list: constantArrivalScenario('listMessages', 4, '120s', 6, 20),
+      user_search: constantArrivalScenario('searchUsers', 2, '120s', 4, 12),
+      message_create: constantArrivalScenario('createMessage', 2, '120s', 4, 12)
     },
     thresholds: {
-      checks: ['rate>0.999'],
-      http_req_failed: ['rate<0.01'],
-      http_req_duration: ['p(95)<1200'],
-      dropped_iterations: ['count==0'],
-      ...endpointThresholds({
-        conversationList: 1200,
-        messageList: 750,
-        userSearch: 500,
-        messageCreate: 1000
+      ...reliabilityThresholds({
+        phase: 'measured',
+        checks: 'rate>0.999',
+        failures: 'rate<0.01',
+        latency: 1_200,
+        droppedIterations: true
+      }),
+      ...endpointThresholds('measured', {
+        conversation_list: 1_200,
+        message_list: 750,
+        user_search: 500,
+        message_create: 1_000
       })
     }
   },
   load: {
     description: 'Sustained expected traffic through two API instances',
+    metricPhase: 'measured',
+    preconditioning: steadyStatePreconditioning,
     scenarios: {
       conversation_list: constantArrivalScenario('listConversations', 10, '60s', 16, 50),
       message_list: constantArrivalScenario('listMessages', 20, '60s', 24, 80),
@@ -84,20 +168,25 @@ export const performanceProfiles = {
       message_create: constantArrivalScenario('createMessage', 3, '60s', 12, 40)
     },
     thresholds: {
-      checks: ['rate>0.999'],
-      http_req_failed: ['rate<0.01'],
-      http_req_duration: ['p(95)<2000'],
-      dropped_iterations: ['count==0'],
-      ...endpointThresholds({
-        conversationList: 2000,
-        messageList: 1200,
-        userSearch: 750,
-        messageCreate: 1800
+      ...reliabilityThresholds({
+        phase: 'measured',
+        checks: 'rate>0.999',
+        failures: 'rate<0.01',
+        latency: 2_000,
+        droppedIterations: true
+      }),
+      ...endpointThresholds('measured', {
+        conversation_list: 2_000,
+        message_list: 1_200,
+        user_search: 750,
+        message_create: 1_800
       })
     }
   },
   stress: {
     description: 'Ramping traffic used to expose the saturation point',
+    metricPhase: 'measured',
+    preconditioning: steadyStatePreconditioning,
     scenarios: {
       conversation_list: stressScenario('listConversations', 2, [5, 10, 20], 20, 100),
       message_list: stressScenario('listMessages', 4, [10, 20, 40], 30, 150),
@@ -105,8 +194,18 @@ export const performanceProfiles = {
       message_create: stressScenario('createMessage', 1, [2, 4, 8], 16, 80)
     },
     thresholds: {
-      checks: ['rate>0.99'],
-      http_req_failed: ['rate<0.02']
+      ...reliabilityThresholds({
+        phase: 'measured',
+        checks: 'rate>0.99',
+        failures: 'rate<0.02',
+        latency: 30_000
+      }),
+      ...endpointThresholds('measured', {
+        conversation_list: 30_000,
+        message_list: 30_000,
+        user_search: 30_000,
+        message_create: 30_000
+      })
     }
   }
 };
