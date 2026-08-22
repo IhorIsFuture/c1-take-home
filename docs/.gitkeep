@@ -7,3 +7,5 @@ Progress:
 6. Refactor routers, handlers and simple validation for http requests on endpoinds. Update express from v4 to v5.2.1
 7. Create registration and login features, add JWT token for authorization.
 8. Refactor and fix conversation creation logic, adding users into conversation.
+9. Refactoring base functionality of application before tests.
+10. body-hash-not-null migration and remove code

@@ -20,12 +20,11 @@ export interface MessageMetadata {
 export interface MessageMetadataWriteResult {
   metadata: MessageMetadata;
   created: boolean;
-  bodyHash: string | null;
+  bodyHash: string;
 }
 
 export interface MessageMetadataRepository {
   createOrFind(input: NewMessageMetadata): Promise<MessageMetadataWriteResult>;
-  bindBodyHash(messageId: number, bodyHash: string): Promise<string>;
   listByConversationId(conversationId: number): Promise<MessageMetadata[]>;
 }
 
@@ -75,18 +74,6 @@ class SequelizeMessageMetadataRepository implements MessageMetadataRepository {
       created,
       bodyHash: messageWithSender.bodyHash
     };
-  }
-
-  async bindBodyHash(messageId: number, bodyHash: string): Promise<string> {
-    await Message.update({ bodyHash }, { where: { id: messageId, bodyHash: null } });
-
-    const message = await Message.findByPk(messageId, { attributes: ['bodyHash'] });
-
-    if (!message?.bodyHash) {
-      throw new Error(`Body hash for message ${messageId} could not be stored`);
-    }
-
-    return message.bodyHash;
   }
 
   async listByConversationId(conversationId: number): Promise<MessageMetadata[]> {
