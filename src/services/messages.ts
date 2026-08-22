@@ -3,7 +3,8 @@ import { HttpError } from '../errors/http-error';
 import { conversationRepository } from '../repositories/conversation-repository';
 import { messageBodyRepository } from '../repositories/message-body-repository';
 import { messageMetadataRepository } from '../repositories/message-metadata-repository';
-import { broadcast } from '../ws/hub';
+import type { RealtimePublisher } from '../realtime/index';
+import { hashMessageBody } from './message-body-hash';
 
 export interface NewMessage {
   conversationId: number;
@@ -17,21 +18,61 @@ async function requireConversationAccess(conversationId: number, userId: number)
   }
 }
 
-export async function createMessage(userId: number, input: NewMessage) {
+function idempotencyConflict(): HttpError {
+  return new HttpError(
+    409,
+    'MESSAGE_IDEMPOTENCY_CONFLICT',
+    'Client ID has already been used with a different message body'
+  );
+}
+
+export async function createMessage(
+  userId: number,
+  input: NewMessage,
+  realtimePublisher: RealtimePublisher
+) {
   const { conversationId, body, clientId } = input;
   await requireConversationAccess(conversationId, userId);
 
-  const signature = crypto.pbkdf2Sync(body, 'relay-signing', 200000, 32, 'sha256').toString('hex');
+  const bodyHash = hashMessageBody(body);
   const createdAt = new Date();
 
-  const { metadata, created } = await messageMetadataRepository.createOrFind({
+  const {
+    metadata,
+    created,
+    bodyHash: storedBodyHash
+  } = await messageMetadataRepository.createOrFind({
     conversationId,
     senderId: userId,
     clientId,
+    bodyHash,
     createdAt
   });
 
-  const storedBody = await messageBodyRepository.put({
+  if (storedBodyHash && storedBodyHash !== bodyHash) {
+    throw idempotencyConflict();
+  }
+
+  if (!storedBodyHash) {
+    const [legacyBody] = await messageBodyRepository.findByIds([metadata.id]);
+    const belongsToMetadata =
+      legacyBody?.conversationId === metadata.conversationId &&
+      legacyBody.senderId === metadata.senderId &&
+      legacyBody.createdAt.getTime() === metadata.createdAt.getTime();
+
+    if (belongsToMetadata && legacyBody.body !== body) {
+      throw idempotencyConflict();
+    }
+
+    const boundBodyHash = await messageMetadataRepository.bindBodyHash(metadata.id, bodyHash);
+
+    if (boundBodyHash !== bodyHash) {
+      throw idempotencyConflict();
+    }
+  }
+
+  const signature = crypto.pbkdf2Sync(body, 'relay-signing', 200000, 32, 'sha256').toString('hex');
+  const { body: storedBody, materialized } = await messageBodyRepository.put({
     _id: metadata.id,
     conversationId: metadata.conversationId,
     senderId: metadata.senderId,
@@ -39,6 +80,10 @@ export async function createMessage(userId: number, input: NewMessage) {
     signature,
     createdAt: metadata.createdAt
   });
+
+  if (storedBody.body !== body) {
+    throw idempotencyConflict();
+  }
 
   const message = {
     id: metadata.id,
@@ -48,7 +93,10 @@ export async function createMessage(userId: number, input: NewMessage) {
     body: storedBody.body,
     createdAt: metadata.createdAt
   };
-  broadcast(metadata.conversationId, { type: 'message', ...message });
+
+  if (materialized) {
+    await realtimePublisher.publish({ type: 'message.created', message });
+  }
 
   return { message, created };
 }

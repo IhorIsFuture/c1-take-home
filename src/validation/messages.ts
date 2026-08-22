@@ -13,7 +13,7 @@ export const createMessageRequestSchema = z.object({
   body: z.object({
     conversationId: positiveIntegerSchema,
     body: requiredStringSchema(4000),
-    clientId: z.string().uuid('Must be a valid UUID')
+    clientId: z.uuid('Must be a valid UUID')
   })
 });
 

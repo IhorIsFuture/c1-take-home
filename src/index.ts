@@ -1,30 +1,24 @@
-import http from 'node:http';
-import express from 'express';
-import { config } from './config';
-import { connectMysql } from './db/mysql';
-import { connectMongo } from './db/mongo';
-import { errorHandler } from './middleware/error-handler';
-import { conversationRepository } from './repositories/conversation-repository';
-import { apiRouter } from './routes/index';
-import { verifyAccessToken } from './security/access-token';
-import { attachWs } from './ws/hub';
+import { startServer } from './server';
 
-const app = express();
-app.use(express.json());
-app.use(express.static('web'));
-app.use('/api', apiRouter);
-app.use(errorHandler);
+const server = await startServer();
 
-const server = http.createServer(app);
-attachWs(server, {
-  verifyAccessToken,
-  canAccessConversations: (userId, conversationIds) =>
-    conversationRepository.hasAccessToAll(userId, conversationIds)
-});
+console.log(`relay listening on :${server.port}`);
 
-await connectMysql();
-await connectMongo();
+let shuttingDown = false;
 
-server.listen(config.port, () => {
-  console.log(`relay listening on :${config.port}`);
-});
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`relay received ${signal}, shutting down`);
+
+  try {
+    await server.stop();
+    console.log('relay stopped');
+  } catch (error) {
+    console.error('Failed to stop relay', error);
+    process.exitCode = 1;
+  }
+}
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));

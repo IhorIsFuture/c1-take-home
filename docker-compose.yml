@@ -4,15 +4,18 @@ services:
     ports: ['3000:3000']
     volumes:
       - ./docker/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
-    depends_on: [api]
+    depends_on:
+      api:
+        condition: service_healthy
 
   api:
     build:
       context: .
       dockerfile: docker/app/Dockerfile
-    command: npm run dev
+    command: ['node', '--import', 'tsx', '--watch', '--watch-preserve-output', 'src/index.ts']
     init: true
     restart: on-failure
+    stop_grace_period: 15s
     env_file: .env
     expose: ['3000']
     depends_on:
@@ -21,6 +24,18 @@ services:
     volumes:
       - ./src:/app/src
       - ./web:/app/web
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/ready').then(response => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   migrate:
     build:

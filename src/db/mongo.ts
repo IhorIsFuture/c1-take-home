@@ -30,3 +30,14 @@ export async function connectMongo(retries = 20): Promise<void> {
 export async function disconnectMongo(): Promise<void> {
   await mongoose.disconnect();
 }
+
+export async function isMongoReady(): Promise<boolean> {
+  if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) return false;
+
+  try {
+    await mongoose.connection.db.command({ ping: 1 });
+    return true;
+  } catch {
+    return false;
+  }
+}

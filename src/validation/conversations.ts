@@ -13,7 +13,7 @@ export const createConversationRequestSchema = z.object({
       .min(1, 'Must contain at least one participant')
       .max(100, 'Must contain at most 100 participants')
       .transform(participantIds => [...new Set(participantIds)]),
-    clientId: z.string().uuid('Must be a valid UUID')
+    clientId: z.uuid('Must be a valid UUID')
   })
 });
 

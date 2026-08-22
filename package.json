@@ -8,6 +8,7 @@
     "dev": "tsx watch --clear-screen=false src/index.ts",
     "db:migrate": "tsx docker/db/run-migrations.ts",
     "db:seed": "tsx docker/db/seed.ts",
+    "db:backfill:message-body-hashes": "tsx docker/db/run-message-body-hash-backfill.ts",
     "seed": "npm run db:seed",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

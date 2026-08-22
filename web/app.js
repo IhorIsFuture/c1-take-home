@@ -601,7 +601,7 @@ function renderHeader() {
 }
 
 function setComposerAvailability() {
-  const available = Boolean(state.activeConversationId) && state.view === 'conversation';
+  const available = !!state.activeConversationId && state.view === 'conversation';
   elements.text.disabled = !available || state.sending;
   elements.text.placeholder = available ? 'Write a message…' : 'Choose a conversation first';
   elements.sendButton.disabled = !available || state.sending || !elements.text.value.trim();
