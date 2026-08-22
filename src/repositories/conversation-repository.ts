@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, UniqueConstraintError } from 'sequelize';
 import { sequelize } from '../db/mysql';
 import { HttpError } from '../errors/http-error';
 import { Conversation, ConversationParticipant, Message } from '../models/sql';
@@ -37,6 +37,56 @@ export interface ConversationRepository {
   createOrFind(input: NewConversation): Promise<ConversationWriteResult>;
   hasParticipant(conversationId: number, userId: number): Promise<boolean>;
   hasAccessToAll(userId: number, conversationIds: readonly number[]): Promise<boolean>;
+}
+
+function idempotencyConflict(): HttpError {
+  return new HttpError(
+    409,
+    'IDEMPOTENCY_KEY_REUSED',
+    'The idempotency key was already used with different conversation data'
+  );
+}
+
+async function findExistingConversation(
+  input: NewConversation
+): Promise<ConversationWriteResult | null> {
+  const conversation = await Conversation.findOne({
+    where: {
+      createdByUserId: input.createdByUserId,
+      clientId: input.clientId
+    }
+  });
+
+  if (!conversation) return null;
+
+  const currentParticipantIds = (
+    await ConversationParticipant.findAll({
+      attributes: ['userId'],
+      where: { conversationId: conversation.id },
+      order: [['userId', 'ASC']],
+      raw: true
+    })
+  ).map(participant => participant.userId);
+  const requestedParticipantIds = [...input.participantIds].sort((left, right) => left - right);
+
+  if (
+    conversation.title !== input.title ||
+    currentParticipantIds.length !== requestedParticipantIds.length ||
+    currentParticipantIds.some((userId, index) => userId !== requestedParticipantIds[index])
+  ) {
+    throw idempotencyConflict();
+  }
+
+  return {
+    conversation: {
+      id: conversation.id,
+      title: conversation.title,
+      participantIds: currentParticipantIds,
+      createdByUserId: conversation.createdByUserId,
+      clientId: conversation.clientId
+    },
+    created: false
+  };
 }
 
 class SequelizeConversationRepository implements ConversationRepository {
@@ -106,77 +156,47 @@ class SequelizeConversationRepository implements ConversationRepository {
   }
 
   async createOrFind(input: NewConversation): Promise<ConversationWriteResult> {
-    return sequelize.transaction(async transaction => {
-      const [conversation, created] = await Conversation.findOrCreate({
-        where: {
-          createdByUserId: input.createdByUserId,
-          clientId: input.clientId
-        },
-        defaults: {
-          title: input.title,
-          createdByUserId: input.createdByUserId,
-          clientId: input.clientId
-        },
-        transaction
-      });
+    const existingConversation = await findExistingConversation(input);
+    if (existingConversation) return existingConversation;
 
-      if (!created) {
-        const currentParticipantIds = (
-          await ConversationParticipant.findAll({
-            attributes: ['userId'],
-            where: { conversationId: conversation.id },
-            order: [['userId', 'ASC']],
-            raw: true,
-            transaction
-          })
-        ).map(participant => participant.userId);
-        const requestedParticipantIds = [...input.participantIds].sort(
-          (left, right) => left - right
+    try {
+      return await sequelize.transaction(async transaction => {
+        const conversation = await Conversation.create(
+          {
+            title: input.title,
+            createdByUserId: input.createdByUserId,
+            clientId: input.clientId
+          },
+          { transaction }
         );
 
-        if (
-          conversation.title !== input.title ||
-          currentParticipantIds.length !== requestedParticipantIds.length ||
-          currentParticipantIds.some((userId, index) => userId !== requestedParticipantIds[index])
-        ) {
-          throw new HttpError(
-            409,
-            'IDEMPOTENCY_KEY_REUSED',
-            'The idempotency key was already used with different conversation data'
-          );
-        }
+        await ConversationParticipant.bulkCreate(
+          input.participantIds.map(userId => ({
+            conversationId: conversation.id,
+            userId
+          })),
+          { transaction }
+        );
 
         return {
           conversation: {
             id: conversation.id,
             title: conversation.title,
-            participantIds: currentParticipantIds,
+            participantIds: input.participantIds,
             createdByUserId: conversation.createdByUserId,
             clientId: conversation.clientId
           },
-          created: false
+          created: true
         };
-      }
+      });
+    } catch (error) {
+      if (!(error instanceof UniqueConstraintError)) throw error;
 
-      await ConversationParticipant.bulkCreate(
-        input.participantIds.map(userId => ({
-          conversationId: conversation.id,
-          userId
-        })),
-        { transaction }
-      );
+      const concurrentConversation = await findExistingConversation(input);
+      if (concurrentConversation) return concurrentConversation;
 
-      return {
-        conversation: {
-          id: conversation.id,
-          title: conversation.title,
-          participantIds: input.participantIds,
-          createdByUserId: conversation.createdByUserId,
-          clientId: conversation.clientId
-        },
-        created: true
-      };
-    });
+      throw error;
+    }
   }
 
   async hasParticipant(conversationId: number, userId: number): Promise<boolean> {

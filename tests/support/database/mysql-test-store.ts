@@ -27,6 +27,14 @@ interface AuthSessionRow extends RowDataPacket {
   lastUsedAt: Date | null;
 }
 
+interface StoredConversationRow extends RowDataPacket {
+  id: number;
+  createdByUserId: number;
+  clientId: string;
+  title: string;
+  createdAt: Date;
+}
+
 export interface StoredUser {
   id: number;
   name: string;
@@ -43,6 +51,14 @@ export interface StoredAuthSession {
   replacedBySessionId: string | null;
   createdAt: Date;
   lastUsedAt: Date | null;
+}
+
+export interface StoredConversation {
+  id: number;
+  createdByUserId: number;
+  clientId: string;
+  title: string;
+  createdAt: Date;
 }
 
 let pool: Pool | undefined;
@@ -99,6 +115,35 @@ export async function listStoredAuthSessions(userId: number): Promise<StoredAuth
   );
 
   return rows;
+}
+
+export async function findStoredConversation(
+  createdByUserId: number,
+  clientId: string
+): Promise<StoredConversation | null> {
+  const [rows] = await getPool().query<StoredConversationRow[]>(
+    'SELECT id, created_by_user_id AS createdByUserId, client_id AS clientId, title, created_at AS createdAt FROM conversations WHERE created_by_user_id = ? AND client_id = ? LIMIT 1',
+    [createdByUserId, clientId]
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function countStoredConversations(): Promise<number> {
+  const [rows] = await getPool().query<(RowDataPacket & { count: number })[]>(
+    'SELECT COUNT(*) AS count FROM conversations'
+  );
+
+  return rows[0]?.count ?? 0;
+}
+
+export async function listStoredParticipantIds(conversationId: number): Promise<number[]> {
+  const [rows] = await getPool().query<(RowDataPacket & { userId: number })[]>(
+    'SELECT user_id AS userId FROM conversation_participants WHERE conversation_id = ? ORDER BY user_id ASC',
+    [conversationId]
+  );
+
+  return rows.map(row => row.userId);
 }
 
 export async function closeMysqlTestStore(): Promise<void> {
