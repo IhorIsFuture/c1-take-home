@@ -2,17 +2,35 @@ import {
   ApiError,
   createConversation,
   createMessage,
+  getAccessToken,
   getConversations,
+  getCurrentUser,
   getMessages,
-  searchMessages
+  loginAccount,
+  logoutAccount,
+  onSessionExpired,
+  registerAccount,
+  restoreSession,
+  searchMessages,
+  searchUsers
 } from './api.js';
 import { createRelaySocket } from './socket.js';
 
-const currentUserId = 1;
-const defaultParticipantIds = [currentUserId, 2];
 const mobileViewport = window.matchMedia('(max-width: 760px)');
 
 const elements = {
+  auth: document.getElementById('auth'),
+  authLoading: document.getElementById('authLoading'),
+  authForms: document.getElementById('authForms'),
+  authEyebrow: document.getElementById('authEyebrow'),
+  authTitle: document.getElementById('authTitle'),
+  authDescription: document.getElementById('authDescription'),
+  authSwitchPrompt: document.getElementById('authSwitchPrompt'),
+  authSwitch: document.getElementById('authSwitch'),
+  loginForm: document.getElementById('loginForm'),
+  loginError: document.getElementById('loginError'),
+  registerForm: document.getElementById('registerForm'),
+  registerError: document.getElementById('registerError'),
   app: document.getElementById('app'),
   conversations: document.getElementById('conversations'),
   conversationListState: document.getElementById('conversationListState'),
@@ -28,6 +46,10 @@ const elements = {
   newConversationDialog: document.getElementById('newConversationDialog'),
   newConversationForm: document.getElementById('newConversationForm'),
   conversationTitle: document.getElementById('conversationTitle'),
+  participantSearch: document.getElementById('participantSearch'),
+  participantResults: document.getElementById('participantResults'),
+  participantStatus: document.getElementById('participantStatus'),
+  selectedParticipants: document.getElementById('selectedParticipants'),
   cancelConversation: document.getElementById('cancelConversation'),
   createConversation: document.getElementById('createConversation'),
   searchForm: document.getElementById('searchForm'),
@@ -37,10 +59,16 @@ const elements = {
   connectionPill: document.getElementById('connectionPill'),
   chatConnectionBadge: document.getElementById('chatConnectionBadge'),
   chatConnectionLabel: document.getElementById('chatConnectionLabel'),
+  profileAvatar: document.getElementById('profileAvatar'),
+  profileName: document.getElementById('profileName'),
+  profileEmail: document.getElementById('profileEmail'),
+  logoutButton: document.getElementById('logoutButton'),
   toastRegion: document.getElementById('toastRegion')
 };
 
 const state = {
+  user: null,
+  authMode: 'login',
   conversations: [],
   activeConversationId: null,
   activeConversationTitle: null,
@@ -53,14 +81,16 @@ const state = {
   searchQuery: '',
   pendingMessage: null,
   messagesController: null,
-  searchController: null
+  searchController: null,
+  participantController: null,
+  participantSearchTimer: null,
+  participantUsers: [],
+  selectedParticipants: new Map(),
+  creatingConversation: false,
+  pendingConversation: null
 };
 
-const relaySocket = createRelaySocket({
-  getConversationIds: () => state.conversations.map(conversation => conversation.id),
-  onMessage: receiveMessage,
-  onStatus: renderConnectionStatus
-});
+let relaySocket = null;
 
 function createElement(tag, className, text) {
   const element = document.createElement(tag);
@@ -91,6 +121,193 @@ function avatarHue(value) {
 function renderAvatar(element, label) {
   element.textContent = initials(label);
   element.style.setProperty('--avatar-hue', avatarHue(label));
+}
+
+function setFormError(element, message = '') {
+  element.textContent = message;
+  element.hidden = !message;
+}
+
+function setFormBusy(form, busy, busyLabel) {
+  const button = form.querySelector('button[type="submit"]');
+  if (!button.dataset.label) button.dataset.label = button.textContent;
+  button.disabled = busy;
+  button.textContent = busy ? busyLabel : button.dataset.label;
+
+  for (const field of form.querySelectorAll('input')) field.disabled = busy;
+}
+
+function renderAuthMode(mode) {
+  state.authMode = mode;
+  const registering = mode === 'register';
+  elements.loginForm.hidden = registering;
+  elements.registerForm.hidden = !registering;
+  elements.authEyebrow.textContent = registering ? 'Join Relay' : 'Welcome back';
+  elements.authTitle.textContent = registering ? 'Create your account' : 'Sign in to Relay';
+  elements.authDescription.textContent = registering
+    ? 'A few details and your conversations are ready to begin.'
+    : 'Continue where your conversations left off.';
+  elements.authSwitchPrompt.textContent = registering
+    ? 'Already have an account?'
+    : 'New to Relay?';
+  elements.authSwitch.textContent = registering ? 'Sign in instead' : 'Create an account';
+  setFormError(elements.loginError);
+  setFormError(elements.registerError);
+
+  requestAnimationFrame(() => {
+    const field = registering
+      ? elements.registerForm.elements.namedItem('name')
+      : elements.loginForm.elements.namedItem('email');
+    field?.focus();
+  });
+}
+
+function showAuthentication(message = '') {
+  elements.app.hidden = true;
+  elements.auth.hidden = false;
+  elements.authLoading.hidden = true;
+  elements.authForms.hidden = false;
+  renderAuthMode('login');
+  setFormError(elements.loginError, message);
+}
+
+function resetApplicationState() {
+  state.conversations = [];
+  state.activeConversationId = null;
+  state.activeConversationTitle = null;
+  state.messages = [];
+  state.seenMessageIds.clear();
+  state.view = 'welcome';
+  state.loadingConversations = true;
+  state.loadingMessages = false;
+  state.sending = false;
+  state.searchQuery = '';
+  state.pendingMessage = null;
+  state.messagesController?.abort();
+  state.searchController?.abort();
+  state.participantController?.abort();
+  clearTimeout(state.participantSearchTimer);
+  state.selectedParticipants.clear();
+  state.participantUsers = [];
+  state.pendingConversation = null;
+  elements.app.classList.remove('is-chat-open');
+  elements.search.value = '';
+  elements.text.value = '';
+}
+
+async function enterApplication(user) {
+  state.user = user;
+  resetApplicationState();
+  elements.auth.hidden = true;
+  elements.app.hidden = false;
+  elements.profileName.textContent = user.name;
+  elements.profileEmail.textContent = user.email;
+  renderAvatar(elements.profileAvatar, user.name);
+
+  relaySocket?.close();
+  relaySocket = createRelaySocket({
+    getAccessToken,
+    getConversationIds: () => state.conversations.map(conversation => conversation.id),
+    refreshAccessToken: restoreSession,
+    onAuthenticationFailed: () => leaveApplication('Your session expired. Please sign in again.'),
+    onMessage: receiveMessage,
+    onStatus: renderConnectionStatus
+  });
+  relaySocket.connect();
+  await loadConversations();
+}
+
+function leaveApplication(message = '') {
+  relaySocket?.close();
+  relaySocket = null;
+  state.user = null;
+  resetApplicationState();
+  showAuthentication(message);
+}
+
+async function resolveSessionUser(session) {
+  return session?.user ?? getCurrentUser();
+}
+
+async function submitLogin(event) {
+  event.preventDefault();
+  setFormError(elements.loginError);
+  const data = new FormData(elements.loginForm);
+  setFormBusy(elements.loginForm, true, 'Signing in…');
+
+  try {
+    const session = await loginAccount({
+      email: String(data.get('email') ?? '').trim(),
+      password: String(data.get('password') ?? '')
+    });
+    elements.loginForm.reset();
+    await enterApplication(await resolveSessionUser(session));
+  } catch (error) {
+    setFormError(elements.loginError, error.message ?? 'Could not sign in. Please try again.');
+  } finally {
+    setFormBusy(elements.loginForm, false, '');
+  }
+}
+
+async function submitRegistration(event) {
+  event.preventDefault();
+  setFormError(elements.registerError);
+
+  const data = new FormData(elements.registerForm);
+  const password = String(data.get('password') ?? '');
+  const passwordConfirmation = String(data.get('passwordConfirmation') ?? '');
+
+  if (password !== passwordConfirmation) {
+    setFormError(elements.registerError, 'Passwords do not match.');
+    elements.registerForm.elements.namedItem('passwordConfirmation')?.focus();
+    return;
+  }
+
+  setFormBusy(elements.registerForm, true, 'Creating account…');
+
+  try {
+    const session = await registerAccount({
+      name: String(data.get('name') ?? '').trim(),
+      email: String(data.get('email') ?? '').trim(),
+      password,
+      passwordConfirmation
+    });
+    elements.registerForm.reset();
+    await enterApplication(await resolveSessionUser(session));
+  } catch (error) {
+    setFormError(
+      elements.registerError,
+      error.message ?? 'Could not create your account. Please try again.'
+    );
+  } finally {
+    setFormBusy(elements.registerForm, false, '');
+  }
+}
+
+async function signOut() {
+  elements.logoutButton.disabled = true;
+
+  try {
+    await logoutAccount();
+  } catch (error) {
+    showToast(error.message ?? 'Could not close the session cleanly.', 'error');
+  } finally {
+    elements.logoutButton.disabled = false;
+    leaveApplication();
+  }
+}
+
+async function bootstrap() {
+  elements.auth.hidden = false;
+  elements.authLoading.hidden = false;
+  elements.authForms.hidden = true;
+
+  try {
+    const session = await restoreSession();
+    await enterApplication(await resolveSessionUser(session));
+  } catch {
+    showAuthentication();
+  }
 }
 
 function toDate(value) {
@@ -301,14 +518,16 @@ function renderMessageLoading() {
 }
 
 function createMessageElement(message) {
-  const own = message.senderId === currentUserId;
+  const own = message.senderId === state.user?.id;
   const row = createElement('article', own ? 'message-row is-own' : 'message-row');
   const bubble = createElement('div', 'message-bubble');
 
   row.dataset.messageId = message.id;
 
   if (!own)
-    bubble.appendChild(createElement('span', 'message-sender', `User #${message.senderId}`));
+    bubble.appendChild(
+      createElement('span', 'message-sender', message.senderName || 'Unknown user')
+    );
 
   const body = createElement('p', 'message-body', message.body);
   const footer = createElement('span', 'message-footer');
@@ -462,11 +681,11 @@ async function loadConversations({ openId } = {}) {
   renderConversations();
 
   try {
-    const conversations = await getConversations(currentUserId);
+    const conversations = await getConversations();
     state.conversations = mergeUnreadState(conversations);
     state.loadingConversations = false;
     renderConversations();
-    relaySocket.subscribe();
+    relaySocket?.subscribe();
 
     const activeStillExists = state.conversations.some(
       conversation => conversation.id === state.activeConversationId
@@ -591,7 +810,6 @@ async function submitMessage(event) {
   try {
     const message = await createMessage({
       conversationId: state.activeConversationId,
-      senderId: currentUserId,
       body,
       clientId: pendingMessage.clientId
     });
@@ -615,30 +833,147 @@ async function submitMessage(event) {
   }
 }
 
+function updateCreateConversationButton() {
+  elements.createConversation.disabled =
+    state.creatingConversation || !state.selectedParticipants.size;
+  elements.createConversation.textContent = state.creatingConversation
+    ? 'Creating…'
+    : 'Create conversation';
+}
+
+function renderSelectedParticipants() {
+  elements.selectedParticipants.replaceChildren();
+
+  for (const user of state.selectedParticipants.values()) {
+    const chip = createElement('span', 'participant-chip');
+    chip.appendChild(createElement('span', '', user.name));
+
+    const remove = createElement('button', '', '×');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `Remove ${user.name}`);
+    remove.addEventListener('click', () => {
+      state.selectedParticipants.delete(user.id);
+      state.pendingConversation = null;
+      renderSelectedParticipants();
+      renderParticipantResults();
+      updateCreateConversationButton();
+    });
+    chip.appendChild(remove);
+    elements.selectedParticipants.appendChild(chip);
+  }
+
+  elements.selectedParticipants.hidden = !state.selectedParticipants.size;
+}
+
+function renderParticipantResults() {
+  elements.participantResults.replaceChildren();
+
+  if (!state.participantUsers.length) {
+    elements.participantStatus.textContent = 'No people found.';
+    return;
+  }
+
+  elements.participantStatus.textContent = state.selectedParticipants.size
+    ? `${pluralize(state.selectedParticipants.size, 'person')} selected`
+    : 'Choose at least one person.';
+
+  for (const user of state.participantUsers) {
+    const selected = state.selectedParticipants.has(user.id);
+    const button = createElement(
+      'button',
+      selected ? 'participant-result is-selected' : 'participant-result'
+    );
+    button.type = 'button';
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(selected));
+
+    const avatar = createElement('span', 'avatar participant-avatar');
+    renderAvatar(avatar, user.name);
+    const copy = createElement('span', 'participant-copy');
+    copy.append(createElement('strong', '', user.name), createElement('small', '', user.email));
+    const action = createElement('span', 'participant-action', selected ? 'Selected' : 'Add');
+    button.append(avatar, copy, action);
+    button.addEventListener('click', () => {
+      if (selected) state.selectedParticipants.delete(user.id);
+      else state.selectedParticipants.set(user.id, user);
+      state.pendingConversation = null;
+      renderSelectedParticipants();
+      renderParticipantResults();
+      updateCreateConversationButton();
+    });
+    elements.participantResults.appendChild(button);
+  }
+}
+
+async function loadParticipantUsers(query) {
+  state.participantController?.abort();
+  const controller = new AbortController();
+  state.participantController = controller;
+  elements.participantStatus.textContent = 'Searching…';
+  elements.participantResults.replaceChildren();
+
+  try {
+    const result = await searchUsers(query, controller.signal);
+    if (controller !== state.participantController) return;
+    const users = Array.isArray(result) ? result : (result?.users ?? []);
+    state.participantUsers = users.filter(user => user.id !== state.user?.id);
+    renderParticipantResults();
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    state.participantUsers = [];
+    elements.participantStatus.textContent =
+      error.message ?? 'People could not be loaded. Please try again.';
+  }
+}
+
 function openConversationDialog() {
   elements.newConversationForm.reset();
+  state.selectedParticipants.clear();
+  state.participantUsers = [];
+  state.pendingConversation = null;
+  renderSelectedParticipants();
+  updateCreateConversationButton();
+  elements.participantResults.replaceChildren();
+  elements.participantStatus.textContent = 'Loading people…';
   elements.newConversationDialog.showModal();
+  void loadParticipantUsers('');
   requestAnimationFrame(() => elements.conversationTitle.focus());
+}
+
+function closeConversationDialog() {
+  state.participantController?.abort();
+  clearTimeout(state.participantSearchTimer);
+  elements.newConversationDialog.close();
 }
 
 async function submitConversation(event) {
   event.preventDefault();
   const title = elements.conversationTitle.value.trim();
-  if (!title) return;
+  const participantIds = [...state.selectedParticipants.keys()].sort((left, right) => left - right);
+  if (!title || !participantIds.length || state.creatingConversation) return;
 
-  elements.createConversation.disabled = true;
-  elements.createConversation.textContent = 'Creating…';
+  const fingerprint = JSON.stringify({ title, participantIds });
+  const pendingConversation =
+    state.pendingConversation?.fingerprint === fingerprint
+      ? state.pendingConversation
+      : { fingerprint, clientId: crypto.randomUUID() };
+
+  state.pendingConversation = pendingConversation;
+  state.creatingConversation = true;
+  updateCreateConversationButton();
 
   try {
-    const conversation = await createConversation(title, defaultParticipantIds);
-    elements.newConversationDialog.close();
+    const result = await createConversation(title, participantIds, pendingConversation.clientId);
+    const conversation = result?.conversation ?? result;
+    state.pendingConversation = null;
+    closeConversationDialog();
     await loadConversations({ openId: conversation.id });
     showToast('Conversation created.');
   } catch (error) {
     showToast(error.message ?? 'Conversation could not be created.', 'error');
   } finally {
-    elements.createConversation.disabled = false;
-    elements.createConversation.textContent = 'Create conversation';
+    state.creatingConversation = false;
+    updateCreateConversationButton();
   }
 }
 
@@ -699,8 +1034,22 @@ elements.text.addEventListener('keydown', event => {
 });
 
 elements.newConversationButton.addEventListener('click', openConversationDialog);
-elements.cancelConversation.addEventListener('click', () => elements.newConversationDialog.close());
+elements.cancelConversation.addEventListener('click', closeConversationDialog);
 elements.newConversationForm.addEventListener('submit', submitConversation);
+elements.conversationTitle.addEventListener('input', () => {
+  state.pendingConversation = null;
+});
+elements.participantSearch.addEventListener('input', () => {
+  clearTimeout(state.participantSearchTimer);
+  state.participantSearchTimer = setTimeout(
+    () => loadParticipantUsers(elements.participantSearch.value.trim()),
+    240
+  );
+});
+elements.newConversationDialog.addEventListener('cancel', event => {
+  event.preventDefault();
+  closeConversationDialog();
+});
 
 elements.searchForm.addEventListener('submit', event => {
   event.preventDefault();
@@ -721,13 +1070,20 @@ elements.backButton.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', event => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+  if (!elements.app.hidden && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();
     elements.search.focus();
   }
 });
 
-window.addEventListener('beforeunload', () => relaySocket.close());
+elements.loginForm.addEventListener('submit', submitLogin);
+elements.registerForm.addEventListener('submit', submitRegistration);
+elements.authSwitch.addEventListener('click', () => {
+  renderAuthMode(state.authMode === 'login' ? 'register' : 'login');
+});
+elements.logoutButton.addEventListener('click', signOut);
 
-relaySocket.connect();
-loadConversations();
+onSessionExpired(() => leaveApplication('Your session expired. Please sign in again.'));
+window.addEventListener('beforeunload', () => relaySocket?.close());
+
+void bootstrap();

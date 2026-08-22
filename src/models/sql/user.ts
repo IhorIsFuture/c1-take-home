@@ -11,6 +11,7 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare id: CreationOptional<number>;
   declare name: string;
   declare email: string;
+  declare passwordHash: string;
 }
 
 export function initializeUserModel(sequelize: Sequelize): typeof User {
@@ -28,13 +29,26 @@ export function initializeUserModel(sequelize: Sequelize): typeof User {
       email: {
         type: DataTypes.STRING(190),
         allowNull: false
+      },
+      passwordHash: {
+        type: DataTypes.STRING(255),
+        allowNull: false,
+        field: 'password_hash'
       }
     },
     {
       sequelize,
       modelName: 'User',
       tableName: 'users',
-      timestamps: false
+      timestamps: false,
+      defaultScope: {
+        attributes: { exclude: ['passwordHash'] }
+      },
+      scopes: {
+        withPasswordHash: {
+          attributes: ['id', 'name', 'email', 'passwordHash']
+        }
+      }
     }
   );
 

@@ -16,7 +16,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie": "^2.0.1",
     "express": "^5.2.1",
+    "jose": "^6.2.10",
     "mongoose": "^9.9.3",
     "mysql2": "^3.11.3",
     "sequelize": "^6.37.8",
@@ -26,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.6",
     "@types/ws": "^8.5.12",
     "eslint": "^10.9.0",

@@ -8,7 +8,131 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main id="app" class="app-shell">
+    <main id="auth" class="auth-shell" aria-live="polite">
+      <section class="auth-story" aria-label="About Relay">
+        <a class="auth-brand" href="/" aria-label="Relay home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="m4.5 12 14-7-4.2 14-3.1-5.8L4.5 12Z" />
+              <path d="m11.2 13.2 7.3-8.2" />
+            </svg>
+          </span>
+          <strong>Relay</strong>
+        </a>
+        <div class="auth-story-copy">
+          <p class="eyebrow">Conversations that move with you</p>
+          <h1>A calmer place for meaningful team conversations.</h1>
+          <p>
+            Bring the right people together, stay in the flow and keep every message within reach.
+          </p>
+        </div>
+        <div class="auth-preview" aria-hidden="true">
+          <span class="auth-preview-orbit"></span>
+          <div class="auth-preview-card auth-preview-card-left">
+            <span class="avatar">AK</span>
+            <span><strong>Design sync</strong><small>Ready when you are</small></span>
+          </div>
+          <div class="auth-preview-card auth-preview-card-right">
+            <span class="auth-preview-bubble">Let’s ship it <b>✓✓</b></span>
+          </div>
+        </div>
+        <p class="auth-footnote">Private by design · Built for focus</p>
+      </section>
+
+      <section class="auth-panel">
+        <div id="authLoading" class="auth-loading">
+          <span class="auth-spinner" aria-hidden="true"></span>
+          <strong>Restoring your session</strong>
+          <span>Just a moment…</span>
+        </div>
+
+        <div id="authForms" class="auth-forms" hidden>
+          <div class="auth-heading">
+            <p id="authEyebrow" class="eyebrow">Welcome back</p>
+            <h2 id="authTitle">Sign in to Relay</h2>
+            <p id="authDescription">Continue where your conversations left off.</p>
+          </div>
+
+          <form id="loginForm" class="auth-form">
+            <label for="loginEmail">Email address</label>
+            <input
+              id="loginEmail"
+              name="email"
+              type="email"
+              autocomplete="email"
+              maxlength="190"
+              placeholder="you@example.com"
+              required
+            />
+            <label for="loginPassword">Password</label>
+            <input
+              id="loginPassword"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              maxlength="72"
+              placeholder="Your password"
+              required
+            />
+            <p id="loginError" class="form-error" role="alert" hidden></p>
+            <button class="auth-submit" type="submit">Sign in</button>
+          </form>
+
+          <form id="registerForm" class="auth-form" hidden>
+            <label for="registerName">Your name</label>
+            <input
+              id="registerName"
+              name="name"
+              autocomplete="name"
+              maxlength="100"
+              placeholder="How people will see you"
+              required
+            />
+            <label for="registerEmail">Email address</label>
+            <input
+              id="registerEmail"
+              name="email"
+              type="email"
+              autocomplete="email"
+              maxlength="190"
+              placeholder="you@example.com"
+              required
+            />
+            <label for="registerPassword">Password</label>
+            <input
+              id="registerPassword"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              minlength="8"
+              maxlength="72"
+              placeholder="At least 8 characters"
+              required
+            />
+            <label for="registerPasswordConfirmation">Confirm password</label>
+            <input
+              id="registerPasswordConfirmation"
+              name="passwordConfirmation"
+              type="password"
+              autocomplete="new-password"
+              minlength="8"
+              maxlength="72"
+              placeholder="Repeat your password"
+              required
+            />
+            <p id="registerError" class="form-error" role="alert" hidden></p>
+            <button class="auth-submit" type="submit">Create account</button>
+          </form>
+
+          <p class="auth-switch">
+            <span id="authSwitchPrompt">New to Relay?</span>
+            <button id="authSwitch" type="button">Create an account</button>
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <main id="app" class="app-shell" hidden>
       <aside id="sidebar" class="sidebar" aria-label="Conversations">
         <header class="sidebar-header">
           <a class="brand" href="/" aria-label="Relay home">
@@ -36,14 +160,19 @@
         </header>
 
         <section class="profile-card" aria-label="Current user">
-          <div class="avatar avatar-user">U1</div>
+          <div id="profileAvatar" class="avatar avatar-user">R</div>
           <div class="profile-copy">
-            <strong>User #1</strong>
-            <span><i class="presence-dot"></i> Available</span>
+            <strong id="profileName">Relay user</strong>
+            <span id="profileEmail">Signed in</span>
           </div>
           <span id="connectionPill" class="connection-pill" data-status="connecting"
             >Connecting</span
           >
+          <button id="logoutButton" class="profile-logout" type="button" aria-label="Sign out">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" />
+            </svg>
+          </button>
         </section>
 
         <form id="searchForm" class="search-form" role="search">
@@ -160,7 +289,7 @@
         <div class="dialog-heading">
           <p class="eyebrow">New conversation</p>
           <h2>Create a space to talk</h2>
-          <p>User #1 and User #2 will be added as participants.</p>
+          <p>You will be added automatically. Choose who else should join.</p>
         </div>
         <label for="conversationTitle">Conversation title</label>
         <input
@@ -171,6 +300,30 @@
           placeholder="e.g. Product launch"
           required
         />
+        <div class="participant-field">
+          <label for="participantSearch">Add people</label>
+          <div id="selectedParticipants" class="selected-participants"></div>
+          <div class="participant-search-shell">
+            <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5" />
+              <path d="m16 16 4 4" />
+            </svg>
+            <input
+              id="participantSearch"
+              type="search"
+              autocomplete="off"
+              maxlength="190"
+              placeholder="Search by name or email"
+            />
+          </div>
+          <div
+            id="participantResults"
+            class="participant-results"
+            role="listbox"
+            aria-label="People"
+          ></div>
+          <p id="participantStatus" class="participant-status" aria-live="polite"></p>
+        </div>
         <div class="dialog-actions">
           <button id="cancelConversation" class="button button-secondary" type="button">
             Cancel

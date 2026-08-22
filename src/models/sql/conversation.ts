@@ -13,6 +13,8 @@ export class Conversation extends Model<
   InferCreationAttributes<Conversation>
 > {
   declare id: CreationOptional<number>;
+  declare createdByUserId: number;
+  declare clientId: string;
   declare title: string;
   declare createdAt: CreationOptional<Date>;
 }
@@ -24,6 +26,16 @@ export function initializeConversationModel(sequelize: Sequelize): typeof Conver
         type: DataTypes.INTEGER.UNSIGNED,
         autoIncrement: true,
         primaryKey: true
+      },
+      createdByUserId: {
+        type: DataTypes.INTEGER.UNSIGNED,
+        allowNull: false,
+        field: 'created_by_user_id'
+      },
+      clientId: {
+        type: DataTypes.STRING(64),
+        allowNull: false,
+        field: 'client_id'
       },
       title: {
         type: DataTypes.STRING(200),
