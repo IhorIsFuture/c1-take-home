@@ -49,26 +49,8 @@ export async function createMessage(
     createdAt
   });
 
-  if (storedBodyHash && storedBodyHash !== bodyHash) {
+  if (storedBodyHash !== bodyHash) {
     throw idempotencyConflict();
-  }
-
-  if (!storedBodyHash) {
-    const [legacyBody] = await messageBodyRepository.findByIds([metadata.id]);
-    const belongsToMetadata =
-      legacyBody?.conversationId === metadata.conversationId &&
-      legacyBody.senderId === metadata.senderId &&
-      legacyBody.createdAt.getTime() === metadata.createdAt.getTime();
-
-    if (belongsToMetadata && legacyBody.body !== body) {
-      throw idempotencyConflict();
-    }
-
-    const boundBodyHash = await messageMetadataRepository.bindBodyHash(metadata.id, bodyHash);
-
-    if (boundBodyHash !== bodyHash) {
-      throw idempotencyConflict();
-    }
   }
 
   const signature = crypto.pbkdf2Sync(body, 'relay-signing', 200000, 32, 'sha256').toString('hex');

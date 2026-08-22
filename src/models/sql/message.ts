@@ -15,7 +15,7 @@ export class Message extends Model<InferAttributes<Message>, InferCreationAttrib
   declare conversationId: number;
   declare senderId: number;
   declare clientId: string | null;
-  declare bodyHash: CreationOptional<string | null>;
+  declare bodyHash: string;
   declare createdAt: CreationOptional<Date>;
   declare sender?: NonAttribute<User>;
 }
@@ -45,7 +45,7 @@ export function initializeMessageModel(sequelize: Sequelize): typeof Message {
       },
       bodyHash: {
         type: DataTypes.CHAR(64),
-        allowNull: true,
+        allowNull: false,
         field: 'body_hash'
       },
       createdAt: {
