@@ -5,7 +5,6 @@ export interface MessageBody {
   conversationId: number;
   senderId: number;
   body: string;
-  signature?: string;
   createdAt: Date;
 }
 
@@ -15,7 +14,6 @@ const messageBodySchema = new mongoose.Schema<MessageBody>(
     conversationId: { type: Number, required: true },
     senderId: { type: Number, required: true },
     body: { type: String, required: true },
-    signature: { type: String },
     createdAt: { type: Date, required: true }
   },
   {

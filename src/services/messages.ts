@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { HttpError } from '../errors/http-error';
 import { conversationRepository } from '../repositories/conversation-repository';
 import { messageBodyRepository } from '../repositories/message-body-repository';
@@ -53,13 +52,11 @@ export async function createMessage(
     throw idempotencyConflict();
   }
 
-  const signature = crypto.pbkdf2Sync(body, 'relay-signing', 200000, 32, 'sha256').toString('hex');
   const { body: storedBody, materialized } = await messageBodyRepository.put({
     _id: metadata.id,
     conversationId: metadata.conversationId,
     senderId: metadata.senderId,
     body,
-    signature,
     createdAt: metadata.createdAt
   });
 

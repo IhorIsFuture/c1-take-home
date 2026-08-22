@@ -56,9 +56,9 @@ describe('POST /api/messages', () => {
       _id: response.body.id,
       conversationId: conversation.id,
       senderId: actor.auth.user.id,
-      body: response.body.body,
-      signature: expect.any(String)
+      body: response.body.body
     });
+    expect(storedBody).not.toHaveProperty('signature');
     expect(storedBody?.createdAt.toISOString()).toBe(response.body.createdAt);
   });
 

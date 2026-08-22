@@ -8,7 +8,6 @@ export interface StoredMessageBody {
   conversationId: number;
   senderId: number;
   body: string;
-  signature?: string;
   createdAt: Date;
 }
 
