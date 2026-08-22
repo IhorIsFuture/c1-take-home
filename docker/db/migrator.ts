@@ -19,7 +19,7 @@ export const mysqlMigrator = new Umzug<QueryInterface>({
   logger: console
 });
 
-export const mysqlSeeder = new Umzug({
+export const databaseSeeder = new Umzug({
   migrations: {
     glob: join(dbDirectory, 'seeders', '[0-9]*.ts')
   },
@@ -33,4 +33,4 @@ export const mysqlSeeder = new Umzug({
 });
 
 export type MysqlMigration = (typeof mysqlMigrator)['_types']['migration'];
-export type MysqlSeed = (typeof mysqlSeeder)['_types']['migration'];
+export type DatabaseSeed = (typeof databaseSeeder)['_types']['migration'];

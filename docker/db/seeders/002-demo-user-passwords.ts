@@ -2,12 +2,12 @@ import bcrypt from 'bcrypt';
 import { config } from '../../../src/config';
 import { User } from '../../../src/models/sql';
 import { demoUsers } from '../fixtures';
-import type { MysqlSeed } from '../migrator';
+import type { DatabaseSeed } from '../migrator';
 
 const disabledPasswordHash = '$2b$12$EmXCbJ4SnQP0Jd4OrjxWoO9bwD5qpYGz.FosBbWcupx7v8clLVUv2';
 const defaultDemoPassword = 'RelayDemo123!';
 
-export const up: MysqlSeed = async ({ context: sequelize }) => {
+export const up: DatabaseSeed = async ({ context: sequelize }) => {
   const password = process.env.DEMO_USER_PASSWORD ?? defaultDemoPassword;
   const passwordHashes = await Promise.all(
     demoUsers.map(async user => ({
@@ -30,7 +30,7 @@ export const up: MysqlSeed = async ({ context: sequelize }) => {
   });
 };
 
-export const down: MysqlSeed = async ({ context: sequelize }) => {
+export const down: DatabaseSeed = async ({ context: sequelize }) => {
   await sequelize.transaction(async transaction => {
     await User.update(
       { passwordHash: disabledPasswordHash },

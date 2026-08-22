@@ -180,7 +180,7 @@ class SequelizeConversationRepository implements ConversationRepository {
   }
 
   async hasParticipant(conversationId: number, userId: number): Promise<boolean> {
-    return Boolean(await ConversationParticipant.count({ where: { conversationId, userId } }));
+    return !!(await ConversationParticipant.count({ where: { conversationId, userId } }));
   }
 
   async hasAccessToAll(userId: number, conversationIds: readonly number[]): Promise<boolean> {

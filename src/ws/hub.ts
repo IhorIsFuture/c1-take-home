@@ -25,6 +25,11 @@ export interface WsHubOptions {
   onError?: (error: unknown) => void;
 }
 
+export interface WsHub {
+  webSocketServer: WebSocketServer;
+  broadcast: (conversationId: number, payload: unknown) => void;
+}
+
 type Client = WebSocket & {
   subscriptions: Set<number>;
   userId?: number;
@@ -36,8 +41,6 @@ type Client = WebSocket & {
   maxBufferedAmountBytes: number;
   reportError: (error: unknown) => void;
 };
-
-const clients = new Set<Client>();
 
 function decodeFrame(raw: RawData): string {
   if (Array.isArray(raw)) return Buffer.concat(raw).toString('utf8');
@@ -218,16 +221,16 @@ async function handleFrame(
   );
 }
 
-export function attachWs(server: Server, options?: WsHubOptions): WebSocketServer {
-  const verifyAccessToken = options?.verifyAccessToken ?? (async () => null);
-  const canAccessConversations = options?.canAccessConversations ?? (async () => false);
-  const authTimeoutMs = options?.authTimeoutMs ?? defaultAuthTimeoutMs;
-  const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? defaultHeartbeatIntervalMs;
-  const maxPayloadBytes = options?.maxPayloadBytes ?? defaultMaxPayloadBytes;
-  const maxSubscriptions = options?.maxSubscriptions ?? defaultMaxSubscriptions;
-  const maxBufferedAmountBytes = options?.maxBufferedAmountBytes ?? defaultMaxBufferedAmountBytes;
-  const maxPendingFrames = options?.maxPendingFrames ?? defaultMaxPendingFrames;
-  const reportError = options?.onError ?? (error => console.error('WebSocket error', error));
+export function attachWs(server: Server, options: WsHubOptions): WsHub {
+  const verifyAccessToken = options.verifyAccessToken;
+  const canAccessConversations = options.canAccessConversations;
+  const authTimeoutMs = options.authTimeoutMs ?? defaultAuthTimeoutMs;
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? defaultHeartbeatIntervalMs;
+  const maxPayloadBytes = options.maxPayloadBytes ?? defaultMaxPayloadBytes;
+  const maxSubscriptions = options.maxSubscriptions ?? defaultMaxSubscriptions;
+  const maxBufferedAmountBytes = options.maxBufferedAmountBytes ?? defaultMaxBufferedAmountBytes;
+  const maxPendingFrames = options.maxPendingFrames ?? defaultMaxPendingFrames;
+  const reportError = options.onError ?? (error => console.error('WebSocket error', error));
   const hubClients = new Set<Client>();
   const wss = new WebSocketServer({
     server,
@@ -239,7 +242,6 @@ export function attachWs(server: Server, options?: WsHubOptions): WebSocketServe
     clearAuthenticationTimer(client);
     client.subscriptions.clear();
     hubClients.delete(client);
-    clients.delete(client);
   };
 
   wss.on('connection', (socket: WebSocket) => {
@@ -263,7 +265,6 @@ export function attachWs(server: Server, options?: WsHubOptions): WebSocketServe
     client.authTimer.unref();
 
     hubClients.add(client);
-    clients.add(client);
 
     client.on('pong', () => {
       client.isAlive = true;
@@ -326,25 +327,25 @@ export function attachWs(server: Server, options?: WsHubOptions): WebSocketServe
 
   wss.on('close', () => clearInterval(heartbeatTimer));
 
-  return wss;
-}
+  const broadcast = (conversationId: number, payload: unknown): void => {
+    const data = JSON.stringify(payload);
 
-export function broadcast(conversationId: number, payload: unknown): void {
-  const data = JSON.stringify(payload);
+    for (const client of hubClients) {
+      if (!client.authenticated || !client.subscriptions.has(conversationId)) continue;
+      if (client.readyState !== WebSocket.OPEN) continue;
 
-  for (const client of clients) {
-    if (!client.authenticated || !client.subscriptions.has(conversationId)) continue;
-    if (client.readyState !== WebSocket.OPEN) continue;
+      if (client.bufferedAmount > client.maxBufferedAmountBytes) {
+        client.terminate();
+        continue;
+      }
 
-    if (client.bufferedAmount > client.maxBufferedAmountBytes) {
-      client.terminate();
-      continue;
+      client.send(data, error => {
+        if (!error) return;
+        client.reportError(error);
+        client.terminate();
+      });
     }
+  };
 
-    client.send(data, error => {
-      if (!error) return;
-      client.reportError(error);
-      client.terminate();
-    });
-  }
+  return { webSocketServer: wss, broadcast };
 }

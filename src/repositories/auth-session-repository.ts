@@ -164,7 +164,7 @@ class SequelizeAuthSessionRepository implements AuthSessionRepository {
       }
     );
 
-    return updatedCount > 0;
+    return !!updatedCount;
   }
 }
 

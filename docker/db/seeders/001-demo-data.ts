@@ -6,9 +6,9 @@ import {
   demoMessages,
   demoUsers
 } from '../fixtures';
-import type { MysqlSeed } from '../migrator';
+import type { DatabaseSeed } from '../migrator';
 
-export const up: MysqlSeed = async ({ context: sequelize }) => {
+export const up: DatabaseSeed = async ({ context: sequelize }) => {
   await sequelize.transaction(async transaction => {
     await User.bulkCreate(demoUsers, {
       updateOnDuplicate: ['name', 'email'],
@@ -26,13 +26,13 @@ export const up: MysqlSeed = async ({ context: sequelize }) => {
     });
 
     await Message.bulkCreate(demoMessages, {
-      updateOnDuplicate: ['conversationId', 'senderId', 'clientId', 'createdAt'],
+      updateOnDuplicate: ['conversationId', 'senderId', 'clientId', 'bodyHash', 'createdAt'],
       transaction
     });
   });
 };
 
-export const down: MysqlSeed = async ({ context: sequelize }) => {
+export const down: DatabaseSeed = async ({ context: sequelize }) => {
   await sequelize.transaction(async transaction => {
     await Message.destroy({
       where: { id: { [Op.in]: demoMessages.map(message => message.id) } },

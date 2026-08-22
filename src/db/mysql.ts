@@ -33,3 +33,12 @@ export async function connectMysql(retries = 40): Promise<void> {
 export async function disconnectMysql(): Promise<void> {
   await sequelize.close();
 }
+
+export async function isMysqlReady(): Promise<boolean> {
+  try {
+    await sequelize.authenticate();
+    return true;
+  } catch {
+    return false;
+  }
+}

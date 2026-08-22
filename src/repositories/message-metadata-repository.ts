@@ -5,6 +5,7 @@ export interface NewMessageMetadata {
   conversationId: number;
   senderId: number;
   clientId: string;
+  bodyHash: string;
   createdAt: Date;
 }
 
@@ -19,10 +20,12 @@ export interface MessageMetadata {
 export interface MessageMetadataWriteResult {
   metadata: MessageMetadata;
   created: boolean;
+  bodyHash: string | null;
 }
 
 export interface MessageMetadataRepository {
   createOrFind(input: NewMessageMetadata): Promise<MessageMetadataWriteResult>;
+  bindBodyHash(messageId: number, bodyHash: string): Promise<string>;
   listByConversationId(conversationId: number): Promise<MessageMetadata[]>;
 }
 
@@ -59,7 +62,7 @@ class SequelizeMessageMetadataRepository implements MessageMetadataRepository {
     });
 
     const messageWithSender = await Message.findByPk(message.id, {
-      attributes: ['id', 'conversationId', 'senderId', 'createdAt'],
+      attributes: ['id', 'conversationId', 'senderId', 'bodyHash', 'createdAt'],
       include: [senderInclude]
     });
 
@@ -67,7 +70,23 @@ class SequelizeMessageMetadataRepository implements MessageMetadataRepository {
       throw new Error(`Message ${message.id} was not found after creation`);
     }
 
-    return { metadata: toMessageMetadata(messageWithSender), created };
+    return {
+      metadata: toMessageMetadata(messageWithSender),
+      created,
+      bodyHash: messageWithSender.bodyHash
+    };
+  }
+
+  async bindBodyHash(messageId: number, bodyHash: string): Promise<string> {
+    await Message.update({ bodyHash }, { where: { id: messageId, bodyHash: null } });
+
+    const message = await Message.findByPk(messageId, { attributes: ['bodyHash'] });
+
+    if (!message?.bodyHash) {
+      throw new Error(`Body hash for message ${messageId} could not be stored`);
+    }
+
+    return message.bodyHash;
   }
 
   async listByConversationId(conversationId: number): Promise<MessageMetadata[]> {

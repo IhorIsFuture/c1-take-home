@@ -1,4 +1,5 @@
 import type { MessageBody } from '../../src/models/message-body';
+import { hashMessageBody } from '../../src/services/message-body-hash';
 
 export const demoUsers = [
   {
@@ -47,32 +48,40 @@ export const demoConversationParticipants = [
   { conversationId: 2, userId: 3 }
 ];
 
-export const demoMessages = [
-  { id: 1, conversationId: 1, senderId: 2, clientId: null, createdAt: demoCreatedAt },
-  { id: 2, conversationId: 1, senderId: 1, clientId: null, createdAt: demoCreatedAt },
-  { id: 3, conversationId: 2, senderId: 3, clientId: null, createdAt: demoCreatedAt }
-];
-
-export const demoMessageBodies: MessageBody[] = [
+const demoMessageFixtures = [
   {
-    _id: 1,
+    id: 1,
     conversationId: 1,
     senderId: 2,
     body: 'Hi, any update on order #1042?',
     createdAt: demoCreatedAt
   },
   {
-    _id: 2,
+    id: 2,
     conversationId: 1,
     senderId: 1,
     body: 'Checking now — give me a minute.',
     createdAt: demoCreatedAt
   },
   {
-    _id: 3,
+    id: 3,
     conversationId: 2,
     senderId: 3,
     body: 'Notes from the design sync are in the doc.',
     createdAt: demoCreatedAt
   }
 ];
+
+export const demoMessages = demoMessageFixtures.map(({ body, ...message }) => ({
+  ...message,
+  clientId: null,
+  bodyHash: hashMessageBody(body)
+}));
+
+export const demoMessageBodies: MessageBody[] = demoMessageFixtures.map(
+  ({ id, body, ...message }) => ({
+    _id: id,
+    ...message,
+    body
+  })
+);

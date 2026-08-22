@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import { config } from '../config';
 
-const dummyPasswordHash = '$2b$12$Ho.eMFsTE3Ci57tjuxcaaO.SaZCrnwMqGQIZRufnY7/tXmzqxQL1u';
+const dummyPasswordHash = await bcrypt.hash('relay-missing-user-password', config.auth.bcryptCost);
 
 export function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, config.auth.bcryptCost);
