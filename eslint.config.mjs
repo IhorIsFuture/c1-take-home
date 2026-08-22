@@ -10,7 +10,14 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.{js,ts}', 'docker/**/*.{ts,mjs}', '*.config.{js,mjs}', '.prettierrc.js'],
+    files: [
+      'src/**/*.{js,ts}',
+      'docker/**/*.{ts,mjs}',
+      'performance/**/*.mjs',
+      'tests/**/*.ts',
+      '*.config.{js,mjs,ts}',
+      '.prettierrc.js'
+    ],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -23,6 +30,16 @@ export default tseslint.config(
       ecmaVersion: 'latest',
       sourceType: 'module',
       globals: globals.browser
+    }
+  },
+  {
+    files: ['tests/performance/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        __ENV: 'readonly'
+      }
     }
   },
   {

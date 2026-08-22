@@ -6,6 +6,10 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch --clear-screen=false src/index.ts",
+    "test": "npm run test:integration",
+    "test:integration": "npm run test:env:run -- npm run test:integration:run",
+    "test:integration:run": "vitest run --config vitest.integration.config.ts",
+    "test:integration:watch": "npm run test:env:run -- vitest --config vitest.integration.config.ts",
     "db:migrate": "tsx docker/db/run-migrations.ts",
     "db:seed": "tsx docker/db/seed.ts",
     "db:seed:performance": "tsx docker/db/seed-performance.ts",
@@ -23,6 +27,12 @@
     "perf:env:up": "npm run perf:env:down && npm run perf:env:start",
     "perf:env:down": "docker compose --project-name relay-perf -f docker-compose.perf.yml down --volumes --remove-orphans",
     "perf:env:reset": "npm run perf:env:up",
+    "perf:test": "npm run perf:test:baseline",
+    "perf:test:smoke": "node docker/performance-environment.mjs smoke",
+    "perf:test:baseline": "node docker/performance-environment.mjs baseline",
+    "perf:test:load": "node docker/performance-environment.mjs load",
+    "perf:test:stress": "node docker/performance-environment.mjs stress",
+    "perf:compare": "node performance/compare-results.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -52,6 +62,7 @@
     "prettier": "^3.8.1",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
-    "typescript-eslint": "^8.67.0"
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11"
   }
 }

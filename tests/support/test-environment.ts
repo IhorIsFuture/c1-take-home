@@ -1,0 +1,27 @@
+import { z } from 'zod';
+
+const testEnvironmentSchema = z.object({
+  NODE_ENV: z.literal('test'),
+  TEST_ENV_GUARD: z.literal('relay-test'),
+  TEST_BASE_URL: z.literal('http://127.0.0.1:13000'),
+  TEST_WS_URL: z.literal('ws://127.0.0.1:13000'),
+  MYSQL_URL: z.literal('mysql://relay_test:relay_test@127.0.0.1:13306/relay_test?charset=utf8mb4'),
+  MONGO_URL: z.literal('mongodb://127.0.0.1:27018/relay_test'),
+  REDIS_URL: z.literal('redis://127.0.0.1:16379/15'),
+  JWT_ACCESS_SECRET: z.literal('relay-test-access-secret-with-at-least-32-characters'),
+  JWT_ISSUER: z.literal('relay-test-api'),
+  JWT_AUDIENCE: z.literal('relay-test-client')
+});
+
+const environment = testEnvironmentSchema.parse(process.env);
+
+export const testEnvironment = {
+  baseUrl: environment.TEST_BASE_URL,
+  webSocketUrl: environment.TEST_WS_URL,
+  mysqlUrl: environment.MYSQL_URL,
+  mongoUrl: environment.MONGO_URL,
+  redisUrl: environment.REDIS_URL,
+  accessTokenSecret: environment.JWT_ACCESS_SECRET,
+  accessTokenIssuer: environment.JWT_ISSUER,
+  accessTokenAudience: environment.JWT_AUDIENCE
+};

@@ -15,9 +15,9 @@ x-perf-app-environment: &perf-app-environment
   DEMO_USER_PASSWORD: RelayPerf123!
   PERF_ENV_GUARD: relay-perf
   PERF_USER_PASSWORD: RelayPerf123!
-  PERF_USER_COUNT: '100'
-  PERF_CONVERSATION_COUNT: '200'
-  PERF_MESSAGES_PER_CONVERSATION: '50'
+  PERF_USER_COUNT: '${PERF_USER_COUNT:-100}'
+  PERF_CONVERSATION_COUNT: '${PERF_CONVERSATION_COUNT:-200}'
+  PERF_MESSAGES_PER_CONVERSATION: '${PERF_MESSAGES_PER_CONVERSATION:-50}'
 
 x-perf-app: &perf-app
   image: relay-perf-api:local
@@ -97,6 +97,8 @@ services:
     command: ['node', '--import', 'tsx', 'src/index.ts']
     restart: 'no'
     expose: ['3000']
+    deploy:
+      replicas: 2
     ulimits:
       nofile:
         soft: 65535
@@ -130,6 +132,16 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  k6:
+    image: grafana/k6:2.2.0
+    profiles: ['load']
+    volumes:
+      - ./tests/performance:/scripts:ro
+      - ./performance/results:/results
+    depends_on:
+      envoy:
+        condition: service_started
 
 volumes:
   mysql_perf_data:
