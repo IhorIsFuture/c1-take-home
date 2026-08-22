@@ -10,7 +10,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.{js,ts}', 'docker/**/*.ts', '*.config.{js,mjs}', '.prettierrc.js'],
+    files: ['src/**/*.{js,ts}', 'docker/**/*.{ts,mjs}', '*.config.{js,mjs}', '.prettierrc.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

@@ -1,0 +1,141 @@
+name: relay-perf
+
+x-perf-app-environment: &perf-app-environment
+  NODE_ENV: production
+  PORT: '3000'
+  MYSQL_URL: mysql://relay_perf:relay_perf@mysql:3306/relay_perf?charset=utf8mb4
+  MONGO_URL: mongodb://mongo:27017/relay_perf
+  REDIS_URL: redis://redis:6379/0
+  BCRYPT_COST: '12'
+  JWT_ACCESS_SECRET: relay-performance-access-secret-with-at-least-32-characters
+  JWT_ISSUER: relay-perf-api
+  JWT_AUDIENCE: relay-perf-client
+  JWT_ACCESS_TTL_SECONDS: '900'
+  REFRESH_TOKEN_TTL_SECONDS: '2592000'
+  DEMO_USER_PASSWORD: RelayPerf123!
+  PERF_ENV_GUARD: relay-perf
+  PERF_USER_PASSWORD: RelayPerf123!
+  PERF_USER_COUNT: '100'
+  PERF_CONVERSATION_COUNT: '200'
+  PERF_MESSAGES_PER_CONVERSATION: '50'
+
+x-perf-app: &perf-app
+  image: relay-perf-api:local
+  environment: *perf-app-environment
+  init: true
+  stop_grace_period: 15s
+
+services:
+  mysql:
+    image: mysql:8.4.11
+    environment:
+      MYSQL_DATABASE: relay_perf
+      MYSQL_USER: relay_perf
+      MYSQL_PASSWORD: relay_perf
+      MYSQL_ROOT_PASSWORD: relay_perf_root
+    volumes:
+      - mysql_perf_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-prelay_perf_root']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  mongo:
+    image: mongo:7.0.40
+    volumes:
+      - mongo_perf_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7.4.11
+    volumes:
+      - redis_perf_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *perf-app
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    command: ['npm', 'run', 'db:migrate']
+    restart: 'no'
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  seed:
+    <<: *perf-app
+    command: ['npm', 'run', 'db:seed']
+    restart: 'no'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+
+  performance-seed:
+    <<: *perf-app
+    command: ['npm', 'run', 'db:seed:performance']
+    restart: 'no'
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  api:
+    <<: *perf-app
+    command: ['node', '--import', 'tsx', 'src/index.ts']
+    restart: 'no'
+    expose: ['3000']
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    depends_on:
+      performance-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  envoy:
+    image: envoyproxy/envoy:v1.31.10
+    ports:
+      - '127.0.0.1:14000:3000'
+      - '127.0.0.1:19901:9901'
+    configs:
+      - source: relay_perf_envoy
+        target: /etc/envoy/envoy.yaml
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  mysql_perf_data:
+  mongo_perf_data:
+  redis_perf_data:
+
+configs:
+  relay_perf_envoy:
+    file: ./docker/envoy/envoy.yaml

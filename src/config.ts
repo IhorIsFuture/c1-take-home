@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  TEST_ENV_GUARD: z.literal('relay-test').optional(),
   PORT: z.coerce.number().int().positive().max(65_535).default(3000),
   MYSQL_URL: z.string().min(1).default('mysql://root:root@mysql:3306/relay?charset=utf8mb4'),
   MONGO_URL: z.string().min(1).default('mongodb://mongo:27017/relay'),
@@ -20,6 +21,75 @@ const environmentSchema = z.object({
 
 const environment = environmentSchema.parse(process.env);
 const exampleAccessTokenSecret = 'replace-with-at-least-32-random-characters';
+
+function parseConnectionUrl(connectionUrl: string): URL | null {
+  try {
+    return new URL(connectionUrl);
+  } catch {
+    return null;
+  }
+}
+
+function isTestMysqlUrl(connectionUrl: string): boolean {
+  const url = parseConnectionUrl(connectionUrl);
+  if (!url) return false;
+
+  const isComposeEndpoint = url.hostname === 'mysql' && url.port === '3306';
+  const isHostEndpoint =
+    (url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '13306';
+
+  return (
+    url.protocol === 'mysql:' &&
+    url.username === 'relay_test' &&
+    url.password === 'relay_test' &&
+    url.pathname === '/relay_test' &&
+    (isComposeEndpoint || isHostEndpoint)
+  );
+}
+
+function isTestMongoUrl(connectionUrl: string): boolean {
+  const url = parseConnectionUrl(connectionUrl);
+  if (!url) return false;
+
+  const isComposeEndpoint = url.hostname === 'mongo' && url.port === '27017';
+  const isHostEndpoint =
+    (url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '27018';
+
+  return (
+    url.protocol === 'mongodb:' &&
+    !url.username &&
+    !url.password &&
+    url.pathname === '/relay_test' &&
+    (isComposeEndpoint || isHostEndpoint)
+  );
+}
+
+function isTestRedisUrl(connectionUrl: string): boolean {
+  const url = parseConnectionUrl(connectionUrl);
+  if (!url) return false;
+
+  const isComposeEndpoint = url.hostname === 'redis' && url.port === '6379';
+  const isHostEndpoint =
+    (url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '16379';
+
+  return (
+    url.protocol === 'redis:' &&
+    !url.username &&
+    !url.password &&
+    url.pathname === '/15' &&
+    (isComposeEndpoint || isHostEndpoint)
+  );
+}
+
+if (
+  environment.NODE_ENV === 'test' &&
+  (environment.TEST_ENV_GUARD !== 'relay-test' ||
+    !isTestMysqlUrl(environment.MYSQL_URL) ||
+    !isTestMongoUrl(environment.MONGO_URL) ||
+    !isTestRedisUrl(environment.REDIS_URL))
+) {
+  throw new Error('Test environment must use isolated relay_test databases');
+}
 
 if (
   environment.NODE_ENV === 'production' &&
