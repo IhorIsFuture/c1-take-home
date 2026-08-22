@@ -1,18 +1,21 @@
 import type { ValidatedHandler } from '../middleware/validate-request';
+import { requireAuth } from '../middleware/authenticate';
 import { createMessage, listMessages } from '../services/messages';
 import type { CreateMessageRequest, ListMessagesRequest } from '../validation/messages';
 
 export const createMessageHandler: ValidatedHandler<CreateMessageRequest> = async (
-  { body: { conversationId, senderId, body, clientId } },
-  { response }
+  { body: { conversationId, body, clientId } },
+  { request, response }
 ) => {
-  const result = await createMessage({ conversationId, senderId, body, clientId });
+  const { userId } = requireAuth(request);
+  const result = await createMessage(userId, { conversationId, body, clientId });
   response.status(result.created ? 201 : 200).json(result.message);
 };
 
 export const listMessagesHandler: ValidatedHandler<ListMessagesRequest> = async (
   { query: { conversationId } },
-  { response }
+  { request, response }
 ) => {
-  response.json(await listMessages(conversationId));
+  const { userId } = requireAuth(request);
+  response.json(await listMessages(userId, conversationId));
 };

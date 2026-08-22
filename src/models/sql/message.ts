@@ -4,9 +4,11 @@ import {
   InferAttributes,
   InferCreationAttributes,
   Model,
+  NonAttribute,
   Sequelize,
   literal
 } from 'sequelize';
+import type { User } from './user';
 
 export class Message extends Model<InferAttributes<Message>, InferCreationAttributes<Message>> {
   declare id: CreationOptional<number>;
@@ -14,6 +16,7 @@ export class Message extends Model<InferAttributes<Message>, InferCreationAttrib
   declare senderId: number;
   declare clientId: string | null;
   declare createdAt: CreationOptional<Date>;
+  declare sender?: NonAttribute<User>;
 }
 
 export function initializeMessageModel(sequelize: Sequelize): typeof Message {

@@ -1,16 +1,43 @@
 import type { MessageBody } from '../../src/models/message-body';
 
 export const demoUsers = [
-  { id: 1, name: 'Alice', email: 'alice@example.com' },
-  { id: 2, name: 'Bob', email: 'bob@example.com' },
-  { id: 3, name: 'Carol', email: 'carol@example.com' }
+  {
+    id: 1,
+    name: 'Alice',
+    email: 'alice@example.com',
+    passwordHash: '$2b$12$EmXCbJ4SnQP0Jd4OrjxWoO9bwD5qpYGz.FosBbWcupx7v8clLVUv2'
+  },
+  {
+    id: 2,
+    name: 'Bob',
+    email: 'bob@example.com',
+    passwordHash: '$2b$12$EmXCbJ4SnQP0Jd4OrjxWoO9bwD5qpYGz.FosBbWcupx7v8clLVUv2'
+  },
+  {
+    id: 3,
+    name: 'Carol',
+    email: 'carol@example.com',
+    passwordHash: '$2b$12$EmXCbJ4SnQP0Jd4OrjxWoO9bwD5qpYGz.FosBbWcupx7v8clLVUv2'
+  }
 ];
 
 const demoCreatedAt = new Date('2026-08-21T16:57:10.637Z');
 
 export const demoConversations = [
-  { id: 1, title: 'Support — order #1042', createdAt: demoCreatedAt },
-  { id: 2, title: 'Design sync', createdAt: demoCreatedAt }
+  {
+    id: 1,
+    createdByUserId: 1,
+    clientId: 'legacy-1',
+    title: 'Support — order #1042',
+    createdAt: demoCreatedAt
+  },
+  {
+    id: 2,
+    createdByUserId: 1,
+    clientId: 'legacy-2',
+    title: 'Design sync',
+    createdAt: demoCreatedAt
+  }
 ];
 
 export const demoConversationParticipants = [

@@ -12,11 +12,8 @@ export type ListMessagesRequest = z.output<typeof listMessagesRequestSchema>;
 export const createMessageRequestSchema = z.object({
   body: z.object({
     conversationId: positiveIntegerSchema,
-    senderId: positiveIntegerSchema,
     body: requiredStringSchema(4000),
-    clientId: requiredStringSchema(64)
-      .nullish()
-      .transform(clientId => clientId ?? null)
+    clientId: z.string().uuid('Must be a valid UUID')
   })
 });
 

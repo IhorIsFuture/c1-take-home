@@ -4,4 +4,6 @@ Progress:
 3. Replaced usage of mysql from mysql2/promise to Sequelize. Made more stable setup migrations and seeds.
 4. Refactor design on frontend
 5. Fix bug idempotency of requests for creation messages. Reproduce bug: create new conversation, send message. Result: server crashed.
-6.
+6. Refactor routers, handlers and simple validation for http requests on endpoinds. Update express from v4 to v5.2.1
+7. Create registration and login features, add JWT token for authorization.
+8. Refactor and fix conversation creation logic, adding users into conversation.
