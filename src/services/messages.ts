@@ -31,7 +31,11 @@ export async function createMessage(
   realtimePublisher: RealtimePublisher
 ) {
   const { conversationId, body, clientId } = input;
-  await requireConversationAccess(conversationId, userId);
+  const participantIds = await conversationRepository.listParticipantIds(conversationId);
+
+  if (!participantIds.includes(userId)) {
+    throw new HttpError(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
+  }
 
   const bodyHash = hashMessageBody(body);
   const createdAt = new Date();
@@ -52,7 +56,7 @@ export async function createMessage(
     throw idempotencyConflict();
   }
 
-  const { body: storedBody, materialized } = await messageBodyRepository.put({
+  const storedBody = await messageBodyRepository.put({
     _id: metadata.id,
     conversationId: metadata.conversationId,
     senderId: metadata.senderId,
@@ -73,9 +77,7 @@ export async function createMessage(
     createdAt: metadata.createdAt
   };
 
-  if (materialized) {
-    await realtimePublisher.publish({ type: 'message.created', message });
-  }
+  await realtimePublisher.publish({ type: 'message.created', message }, participantIds);
 
   return { message, created };
 }

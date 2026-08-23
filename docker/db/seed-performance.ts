@@ -12,20 +12,20 @@ import { verifyMessageBodyHashes } from './message-body-hash-backfill';
 const performanceEnvironmentSchema = z
   .object({
     PERF_ENV_GUARD: z.literal('relay-perf'),
-    PERF_USER_COUNT: z.coerce.number().int().min(2).max(10_000).default(100),
-    PERF_CONVERSATION_COUNT: z.coerce.number().int().min(1).max(10_000).default(200),
-    PERF_MESSAGES_PER_CONVERSATION: z.coerce.number().int().min(1).max(1_000).default(50),
+    PERF_USER_COUNT: z.coerce.number().int().min(2).max(10000).default(100),
+    PERF_CONVERSATION_COUNT: z.coerce.number().int().min(1).max(10000).default(200),
+    PERF_MESSAGES_PER_CONVERSATION: z.coerce.number().int().min(1).max(1000).default(50),
     PERF_USER_PASSWORD: z.string().min(12).default('RelayPerf123!')
   })
   .refine(
     environment =>
-      environment.PERF_CONVERSATION_COUNT * environment.PERF_MESSAGES_PER_CONVERSATION <= 100_000,
+      environment.PERF_CONVERSATION_COUNT * environment.PERF_MESSAGES_PER_CONVERSATION <= 100000,
     { message: 'Performance dataset cannot exceed 100000 messages' }
   );
 
 const performanceEnvironment = performanceEnvironmentSchema.parse(process.env);
-const firstPerformanceId = 10_000;
-const batchSize = 1_000;
+const firstPerformanceId = 10000;
+const batchSize = 1000;
 const baseCreatedAt = Date.parse('2026-01-01T00:00:00.000Z');
 
 interface PerformanceMessage {
@@ -163,7 +163,7 @@ async function seedPerformanceData(): Promise<void> {
       createdByUserId: firstPerformanceId,
       clientId: `performance-conversation-${index + 1}`,
       title: `Performance Conversation ${index + 1}`,
-      createdAt: new Date(baseCreatedAt + index * 60_000)
+      createdAt: new Date(baseCreatedAt + index * 60000)
     };
   });
   const participants = conversations.flatMap((conversation, index) => {
@@ -189,7 +189,7 @@ async function seedPerformanceData(): Promise<void> {
       const id = firstPerformanceId + datasetMessageIndex;
       const senderId = conversationParticipants[messageIndex % 2].userId;
       const body = `Performance message ${messageIndex + 1} in conversation ${conversationIndex + 1}`;
-      const createdAt = new Date(conversation.createdAt.getTime() + messageIndex * 1_000);
+      const createdAt = new Date(conversation.createdAt.getTime() + messageIndex * 1000);
 
       messages.push({
         id,

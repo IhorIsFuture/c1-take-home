@@ -6,13 +6,12 @@ import { createApp } from './app';
 import { config } from './config';
 import { connectMongo, disconnectMongo, isMongoReady } from './db/mongo';
 import { connectMysql, disconnectMysql, isMysqlReady } from './db/mysql';
-import { InProcessRealtimePublisher } from './realtime/index';
-import { conversationRepository } from './repositories/conversation-repository';
+import { RedisRealtimePubSub } from './realtime/index';
 import { verifyAccessToken } from './security/access-token';
 import { attachWs } from './ws/hub';
 
-const shutdownGracePeriodMs = 5_000;
-const readinessTimeoutMs = 2_500;
+const shutdownGracePeriodMs = 5000;
+const readinessTimeoutMs = 2500;
 
 export interface StartServerOptions {
   port?: number;
@@ -130,17 +129,21 @@ function closeWebSocketServer(webSocketServer: WebSocketServer): Promise<void> {
 async function stopResources(
   server: Server,
   webSocketServer: WebSocketServer,
-  connections: { mongo: boolean; mysql: boolean }
+  realtimePubSub: RedisRealtimePubSub,
+  connections: { mongo: boolean; mysql: boolean; redis: boolean }
 ): Promise<void> {
   const transportResults = await Promise.allSettled([
     closeHttpServer(server),
     closeWebSocketServer(webSocketServer)
   ]);
+  const realtimeResults = await Promise.allSettled([
+    ...(connections.redis ? [realtimePubSub.close()] : [])
+  ]);
   const databaseResults = await Promise.allSettled([
     ...(connections.mongo ? [disconnectMongo()] : []),
     ...(connections.mysql ? [disconnectMysql()] : [])
   ]);
-  const errors = [...transportResults, ...databaseResults]
+  const errors = [...transportResults, ...realtimeResults, ...databaseResults]
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map(result => result.reason);
 
@@ -150,21 +153,26 @@ async function stopResources(
 export async function startServer(options: StartServerOptions = {}): Promise<RunningServer> {
   let ready = false;
   let dependencyReadinessCheck: Promise<boolean> | undefined;
-  const connections = { mongo: false, mysql: false };
+  const connections = { mongo: false, mysql: false, redis: false };
   const server = http.createServer();
-  const { webSocketServer, broadcast } = attachWs(server, {
-    verifyAccessToken,
-    canAccessConversations: (userId, conversationIds) =>
-      conversationRepository.hasAccessToAll(userId, conversationIds)
+  const { webSocketServer, deliver, broadcast } = attachWs(server, { verifyAccessToken });
+  const realtimePubSub = new RedisRealtimePubSub({
+    url: config.redisUrl,
+    namespace: config.redisNamespace,
+    onSubscriberUnavailable: () => broadcast({ type: 'realtime_unavailable' }),
+    onSubscriberRecovered: () => broadcast({ type: 'resync_required' })
   });
-  const realtimePublisher = new InProcessRealtimePublisher(broadcast);
   const app = createApp({
-    realtimePublisher,
+    realtimePublisher: realtimePubSub,
     checkReadiness: async () => {
       if (!ready) return false;
 
-      dependencyReadinessCheck ??= Promise.all([isMysqlReady(), isMongoReady()])
-        .then(([mysqlReady, mongoReady]) => mysqlReady && mongoReady)
+      dependencyReadinessCheck ??= Promise.all([
+        isMysqlReady(),
+        isMongoReady(),
+        realtimePubSub.isReady()
+      ])
+        .then(([mysqlReady, mongoReady, redisReady]) => mysqlReady && mongoReady && redisReady)
         .finally(() => {
           dependencyReadinessCheck = undefined;
         });
@@ -179,6 +187,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     connections.mysql = true;
     await connectMongo();
     connections.mongo = true;
+    await realtimePubSub.start(({ recipientUserIds, event }) => {
+      if (event.type !== 'message.created') return;
+      deliver(recipientUserIds, { type: 'message', ...event.message });
+    });
+    connections.redis = true;
     const port = await listen(server, options.port ?? config.port);
     ready = true;
     let stopPromise: Promise<void> | undefined;
@@ -190,13 +203,15 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       port,
       stop: () => {
         ready = false;
-        stopPromise ??= stopResources(server, webSocketServer, connections);
+        stopPromise ??= stopResources(server, webSocketServer, realtimePubSub, connections);
         return stopPromise;
       }
     };
   } catch (error) {
     ready = false;
-    await stopResources(server, webSocketServer, connections).catch(() => undefined);
+    await stopResources(server, webSocketServer, realtimePubSub, connections).catch(
+      () => undefined
+    );
     throw error;
   }
 }

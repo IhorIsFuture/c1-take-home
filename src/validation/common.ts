@@ -19,7 +19,7 @@ export const positiveIntegerSchema = z
       .number()
       .int(positiveIntegerMessage)
       .positive(positiveIntegerMessage)
-      .max(4_294_967_295, positiveIntegerMessage)
+      .max(4294967295, positiveIntegerMessage)
   );
 
 export function requiredStringSchema(maxLength: number) {

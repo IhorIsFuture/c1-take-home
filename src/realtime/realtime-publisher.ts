@@ -12,6 +12,13 @@ export interface MessageCreatedEvent {
   message: RealtimeMessage;
 }
 
+export interface RealtimeDelivery {
+  recipientUserIds: readonly number[];
+  event: MessageCreatedEvent;
+}
+
+export type RealtimeListener = (delivery: RealtimeDelivery) => void | Promise<void>;
+
 export interface RealtimePublisher {
-  publish(event: MessageCreatedEvent): Promise<void>;
+  publish(event: MessageCreatedEvent, recipientUserIds: readonly number[]): Promise<void>;
 }

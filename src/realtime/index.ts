@@ -1,2 +1,8 @@
-export { InProcessRealtimePublisher } from './in-process-realtime-publisher';
-export type { MessageCreatedEvent, RealtimeMessage, RealtimePublisher } from './realtime-publisher';
+export { RedisRealtimePubSub } from './redis-realtime-pub-sub';
+export type {
+  MessageCreatedEvent,
+  RealtimeDelivery,
+  RealtimeListener,
+  RealtimeMessage,
+  RealtimePublisher
+} from './realtime-publisher';

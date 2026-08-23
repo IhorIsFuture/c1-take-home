@@ -3,10 +3,16 @@ import { z } from 'zod';
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   TEST_ENV_GUARD: z.literal('relay-test').optional(),
-  PORT: z.coerce.number().int().positive().max(65_535).default(3000),
+  PORT: z.coerce.number().int().positive().max(65535).default(3000),
   MYSQL_URL: z.string().min(1).default('mysql://root:root@mysql:3306/relay?charset=utf8mb4'),
   MONGO_URL: z.string().min(1).default('mongodb://mongo:27017/relay'),
   REDIS_URL: z.string().min(1).default('redis://redis:6379'),
+  REDIS_NAMESPACE: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(/^[a-zA-Z0-9:_-]+$/)
+    .default('relay'),
   BCRYPT_COST: z.coerce.number().int().min(10).max(16).default(12),
   JWT_ACCESS_SECRET: z.string().min(32).optional(),
   JWT_ISSUER: z.string().min(1).default('relay-api'),
@@ -104,6 +110,7 @@ export const config = {
   mysqlUrl: environment.MYSQL_URL,
   mongoUrl: environment.MONGO_URL,
   redisUrl: environment.REDIS_URL,
+  redisNamespace: environment.REDIS_NAMESPACE,
   auth: {
     bcryptCost: environment.BCRYPT_COST,
     accessTokenSecret:

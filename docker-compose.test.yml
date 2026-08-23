@@ -7,6 +7,7 @@ x-test-app-environment: &test-app-environment
   MYSQL_URL: mysql://relay_test:relay_test@mysql:3306/relay_test?charset=utf8mb4
   MONGO_URL: mongodb://mongo:27017/relay_test
   REDIS_URL: redis://redis:6379/15
+  REDIS_NAMESPACE: relay-test
   BCRYPT_COST: '10'
   JWT_ACCESS_SECRET: relay-test-access-secret-with-at-least-32-characters
   JWT_ISSUER: relay-test-api

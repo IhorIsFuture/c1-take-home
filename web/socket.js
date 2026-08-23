@@ -1,38 +1,27 @@
 export function createRelaySocket({
   getAccessToken,
-  getConversationIds,
   refreshAccessToken,
   onAuthenticationFailed,
   onMessage,
+  onResyncRequired,
   onStatus
 }) {
   let socket;
   let reconnectTimer;
   let reconnectAttempt = 0;
-  let authenticated = false;
   let authenticationFailed = false;
   let authenticationRecoveryAttempted = false;
   let recoveringAuthentication = false;
+  let hasAuthenticated = false;
   let stopped = false;
 
-  function subscribe() {
-    if (socket?.readyState !== WebSocket.OPEN || !authenticated) return;
-
-    socket.send(
-      JSON.stringify({
-        type: 'subscribe',
-        conversationIds: getConversationIds()
-      })
-    );
-  }
-
   function scheduleReconnect() {
-    authenticated = false;
     onStatus('offline');
 
     if (stopped || authenticationFailed) return;
 
-    const delay = Math.min(1000 * 2 ** reconnectAttempt, 10000);
+    const maximumDelay = Math.min(1000 * 2 ** reconnectAttempt, 10000);
+    const delay = maximumDelay / 2 + Math.random() * (maximumDelay / 2);
     reconnectAttempt += 1;
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(connect, delay);
@@ -73,7 +62,6 @@ export function createRelaySocket({
     }
 
     authenticationFailed = false;
-    authenticated = false;
     onStatus('connecting');
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const nextSocket = new WebSocket(`${protocol}//${location.host}/`);
@@ -93,17 +81,28 @@ export function createRelaySocket({
       }
 
       if (message.type === 'authenticated') {
-        authenticated = true;
+        const reconnected = hasAuthenticated;
+        hasAuthenticated = true;
         authenticationRecoveryAttempted = false;
         reconnectAttempt = 0;
         onStatus('online');
-        subscribe();
+        if (reconnected) onResyncRequired?.();
+        return;
+      }
+
+      if (message.type === 'realtime_unavailable') {
+        onStatus('offline');
+        return;
+      }
+
+      if (message.type === 'resync_required') {
+        onStatus('online');
+        onResyncRequired?.();
         return;
       }
 
       if (message.type === 'auth_error') {
         authenticationFailed = true;
-        authenticated = false;
         onStatus('offline');
         nextSocket.close(1008, 'Authentication failed');
         void recoverAuthentication();
@@ -123,11 +122,10 @@ export function createRelaySocket({
 
   function close() {
     stopped = true;
-    authenticated = false;
     clearTimeout(reconnectTimer);
     socket?.close();
     socket = undefined;
   }
 
-  return { connect, subscribe, close };
+  return { connect, close };
 }

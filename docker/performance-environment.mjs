@@ -20,13 +20,13 @@ const apiReplicas = Number(process.env.PERF_API_REPLICAS ?? 2);
 const userCount = Number(process.env.PERF_USER_COUNT ?? 100);
 const conversationCount = Number(process.env.PERF_CONVERSATION_COUNT ?? 200);
 const messagesPerConversation = Number(process.env.PERF_MESSAGES_PER_CONVERSATION ?? 50);
-const firstConversationId = 10_000;
-const readinessTimeoutMs = 60_000;
-const readinessRequestTimeoutMs = 2_000;
+const firstConversationId = 10000;
+const readinessTimeoutMs = 60000;
+const readinessRequestTimeoutMs = 2000;
 const readinessPollIntervalMs = 250;
-const cleanupTimeoutMs = 90_000;
-const testTimeoutMs = 20 * 60_000;
-const forceKillDelayMs = 5_000;
+const cleanupTimeoutMs = 90000;
+const testTimeoutMs = 20 * 60000;
+const forceKillDelayMs = 5000;
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const resultFileName = `${runId}-${profile}.json`;
 
@@ -38,23 +38,23 @@ if (!Number.isInteger(apiReplicas) || apiReplicas < 1 || apiReplicas > 8) {
   throw new Error('PERF_API_REPLICAS must be an integer between 1 and 8');
 }
 
-if (!Number.isInteger(userCount) || userCount < 2 || userCount > 10_000) {
+if (!Number.isInteger(userCount) || userCount < 2 || userCount > 10000) {
   throw new Error('PERF_USER_COUNT must be an integer between 2 and 10000');
 }
 
-if (!Number.isInteger(conversationCount) || conversationCount < 1 || conversationCount > 10_000) {
+if (!Number.isInteger(conversationCount) || conversationCount < 1 || conversationCount > 10000) {
   throw new Error('PERF_CONVERSATION_COUNT must be an integer between 1 and 10000');
 }
 
 if (
   !Number.isInteger(messagesPerConversation) ||
   messagesPerConversation < 1 ||
-  messagesPerConversation > 1_000
+  messagesPerConversation > 1000
 ) {
   throw new Error('PERF_MESSAGES_PER_CONVERSATION must be an integer between 1 and 1000');
 }
 
-if (conversationCount * messagesPerConversation > 100_000) {
+if (conversationCount * messagesPerConversation > 100000) {
   throw new Error('Performance dataset cannot exceed 100000 messages');
 }
 
@@ -262,7 +262,7 @@ async function runPerformanceTest() {
         '--scale',
         `api=${apiReplicas}`
       ],
-      { timeoutMs: 10 * 60_000 }
+      { timeoutMs: 10 * 60000 }
     );
     await waitForReadiness();
 

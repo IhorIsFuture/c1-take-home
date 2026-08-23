@@ -81,7 +81,7 @@ const warmupScenarios = {
 
 const steadyStatePreconditioning = {
   profile: 'warmup',
-  settleDelayMs: 2_000,
+  settleDelayMs: 2000,
   scenarios: warmupScenarios
 };
 
@@ -96,14 +96,14 @@ export const performanceProfiles = {
         phase: 'warmup',
         checks: 'rate==1',
         failures: 'rate==0',
-        latency: 30_000,
+        latency: 30000,
         droppedIterations: true
       }),
       ...endpointThresholds('warmup', {
-        conversation_list: 30_000,
-        message_list: 30_000,
-        user_search: 30_000,
-        message_create: 30_000
+        conversation_list: 30000,
+        message_list: 30000,
+        user_search: 30000,
+        message_create: 30000
       })
     }
   },
@@ -121,13 +121,13 @@ export const performanceProfiles = {
         phase: 'measured',
         checks: 'rate==1',
         failures: 'rate==0',
-        latency: 30_000
+        latency: 30000
       }),
       ...endpointThresholds('measured', {
-        conversation_list: 30_000,
-        message_list: 30_000,
-        user_search: 30_000,
-        message_create: 30_000
+        conversation_list: 30000,
+        message_list: 30000,
+        user_search: 30000,
+        message_create: 30000
       })
     }
   },
@@ -146,14 +146,14 @@ export const performanceProfiles = {
         phase: 'measured',
         checks: 'rate>0.999',
         failures: 'rate<0.01',
-        latency: 1_200,
+        latency: 1200,
         droppedIterations: true
       }),
       ...endpointThresholds('measured', {
-        conversation_list: 1_200,
+        conversation_list: 1200,
         message_list: 750,
         user_search: 500,
-        message_create: 1_000
+        message_create: 1000
       })
     }
   },
@@ -172,14 +172,14 @@ export const performanceProfiles = {
         phase: 'measured',
         checks: 'rate>0.999',
         failures: 'rate<0.01',
-        latency: 2_000,
+        latency: 2000,
         droppedIterations: true
       }),
       ...endpointThresholds('measured', {
-        conversation_list: 2_000,
-        message_list: 1_200,
+        conversation_list: 2000,
+        message_list: 1200,
         user_search: 750,
-        message_create: 1_800
+        message_create: 1800
       })
     }
   },
@@ -198,13 +198,13 @@ export const performanceProfiles = {
         phase: 'measured',
         checks: 'rate>0.99',
         failures: 'rate<0.02',
-        latency: 30_000
+        latency: 30000
       }),
       ...endpointThresholds('measured', {
-        conversation_list: 30_000,
-        message_list: 30_000,
-        user_search: 30_000,
-        message_create: 30_000
+        conversation_list: 30000,
+        message_list: 30000,
+        user_search: 30000,
+        message_create: 30000
       })
     }
   }
