@@ -5,13 +5,8 @@ type MessageBodyContent = Pick<
   '_id' | 'conversationId' | 'senderId' | 'body' | 'createdAt'
 >;
 
-export interface MessageBodyWriteResult {
-  body: MessageBodyContent;
-  materialized: boolean;
-}
-
 export interface MessageBodyRepository {
-  put(message: MessageBody): Promise<MessageBodyWriteResult>;
+  put(message: MessageBody): Promise<MessageBodyContent>;
   findByIds(ids: readonly number[]): Promise<MessageBodyContent[]>;
   ensureSeeded(messages: readonly MessageBody[]): Promise<void>;
 }
@@ -29,7 +24,7 @@ function belongsToMetadata(current: MessageBodyContent, message: MessageBody): b
 }
 
 class MongooseMessageBodyRepository implements MessageBodyRepository {
-  async put(message: MessageBody): Promise<MessageBodyWriteResult> {
+  async put(message: MessageBody): Promise<MessageBodyContent> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const current = await MessageBodyModel.findById(message._id)
         .lean<MessageBodyContent>()
@@ -38,7 +33,7 @@ class MongooseMessageBodyRepository implements MessageBodyRepository {
       if (!current) {
         try {
           await MessageBodyModel.create(message);
-          return { body: message, materialized: true };
+          return message;
         } catch (error) {
           if (isDuplicateKeyError(error)) continue;
           throw error;
@@ -46,7 +41,7 @@ class MongooseMessageBodyRepository implements MessageBodyRepository {
       }
 
       if (belongsToMetadata(current, message)) {
-        return { body: current, materialized: false };
+        return current;
       }
 
       const result = await MessageBodyModel.replaceOne(
@@ -60,7 +55,7 @@ class MongooseMessageBodyRepository implements MessageBodyRepository {
       ).exec();
 
       if (result.modifiedCount === 1) {
-        return { body: message, materialized: true };
+        return message;
       }
     }
 

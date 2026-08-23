@@ -35,8 +35,8 @@ export interface ConversationWriteResult {
 export interface ConversationRepository {
   listByUserId(userId: number): Promise<ConversationDto[]>;
   createOrFind(input: NewConversation): Promise<ConversationWriteResult>;
+  listParticipantIds(conversationId: number): Promise<number[]>;
   hasParticipant(conversationId: number, userId: number): Promise<boolean>;
-  hasAccessToAll(userId: number, conversationIds: readonly number[]): Promise<boolean>;
 }
 
 function idempotencyConflict(): HttpError {
@@ -203,18 +203,15 @@ class SequelizeConversationRepository implements ConversationRepository {
     return !!(await ConversationParticipant.count({ where: { conversationId, userId } }));
   }
 
-  async hasAccessToAll(userId: number, conversationIds: readonly number[]): Promise<boolean> {
-    const uniqueConversationIds = [...new Set(conversationIds)];
-    if (!uniqueConversationIds.length) return true;
-
-    const accessibleCount = await ConversationParticipant.count({
-      where: {
-        userId,
-        conversationId: { [Op.in]: uniqueConversationIds }
-      }
+  async listParticipantIds(conversationId: number): Promise<number[]> {
+    const participants = await ConversationParticipant.findAll({
+      attributes: ['userId'],
+      where: { conversationId },
+      order: [['userId', 'ASC']],
+      raw: true
     });
 
-    return accessibleCount === uniqueConversationIds.length;
+    return participants.map(participant => participant.userId);
   }
 }
 

@@ -1,11 +1,10 @@
 import type { Server } from 'node:http';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
-import { authenticateFrameSchema, subscribeFrameSchema } from './protocol';
+import { authenticateFrameSchema } from './protocol';
 
 const defaultAuthTimeoutMs = 5_000;
 const defaultHeartbeatIntervalMs = 30_000;
 const defaultMaxPayloadBytes = 16 * 1024;
-const defaultMaxSubscriptions = 100;
 const defaultMaxBufferedAmountBytes = 1024 * 1024;
 const defaultMaxPendingFrames = 32;
 
@@ -15,11 +14,9 @@ export interface WsAuthenticatedUser {
 
 export interface WsHubOptions {
   verifyAccessToken: (accessToken: string) => Promise<WsAuthenticatedUser | null>;
-  canAccessConversations: (userId: number, conversationIds: readonly number[]) => Promise<boolean>;
   authTimeoutMs?: number;
   heartbeatIntervalMs?: number;
   maxPayloadBytes?: number;
-  maxSubscriptions?: number;
   maxBufferedAmountBytes?: number;
   maxPendingFrames?: number;
   onError?: (error: unknown) => void;
@@ -27,11 +24,10 @@ export interface WsHubOptions {
 
 export interface WsHub {
   webSocketServer: WebSocketServer;
-  broadcast: (conversationId: number, payload: unknown) => void;
+  deliver: (recipientUserIds: readonly number[], payload: unknown) => void;
 }
 
 type Client = WebSocket & {
-  subscriptions: Set<number>;
   userId?: number;
   authenticated: boolean;
   isAlive: boolean;
@@ -48,7 +44,7 @@ function decodeFrame(raw: RawData): string {
   return raw.toString('utf8');
 }
 
-function sendJson(client: Client, payload: unknown): boolean {
+function sendSerialized(client: Client, data: string): boolean {
   if (client.readyState !== WebSocket.OPEN) return false;
 
   if (client.bufferedAmount > client.maxBufferedAmountBytes) {
@@ -56,7 +52,7 @@ function sendJson(client: Client, payload: unknown): boolean {
     return false;
   }
 
-  client.send(JSON.stringify(payload), error => {
+  client.send(data, error => {
     if (!error) return;
     client.reportError(error);
     client.terminate();
@@ -65,9 +61,13 @@ function sendJson(client: Client, payload: unknown): boolean {
   return true;
 }
 
+function sendJson(client: Client, payload: unknown): boolean {
+  return sendSerialized(client, JSON.stringify(payload));
+}
+
 function closeWithError(
   client: Client,
-  type: 'auth_error' | 'subscription_error' | 'protocol_error' | 'server_error',
+  type: 'auth_error' | 'protocol_error' | 'server_error',
   code: string,
   reason: string,
   closeCode: number
@@ -86,7 +86,7 @@ async function authenticateClient(
   client: Client,
   frame: unknown,
   verifyAccessToken: WsHubOptions['verifyAccessToken']
-): Promise<void> {
+): Promise<number | null> {
   const result = authenticateFrameSchema.safeParse(frame);
 
   if (!result.success) {
@@ -97,7 +97,7 @@ async function authenticateClient(
       'Authentication required',
       1008
     );
-    return;
+    return null;
   }
 
   let authenticatedUser: WsAuthenticatedUser | null;
@@ -107,7 +107,7 @@ async function authenticateClient(
   } catch (error) {
     client.reportError(error);
     closeWithError(client, 'server_error', 'AUTHENTICATION_UNAVAILABLE', 'Server error', 1011);
-    return;
+    return null;
   }
 
   if (
@@ -116,83 +116,24 @@ async function authenticateClient(
     authenticatedUser.userId <= 0
   ) {
     closeWithError(client, 'auth_error', 'INVALID_ACCESS_TOKEN', 'Authentication failed', 1008);
-    return;
+    return null;
   }
 
-  if (client.readyState !== WebSocket.OPEN) return;
+  if (client.readyState !== WebSocket.OPEN) return null;
 
   client.userId = authenticatedUser.userId;
   client.authenticated = true;
   clearAuthenticationTimer(client);
   sendJson(client, { type: 'authenticated' });
-}
-
-async function updateSubscriptions(
-  client: Client,
-  frame: unknown,
-  canAccessConversations: WsHubOptions['canAccessConversations'],
-  maxSubscriptions: number
-): Promise<void> {
-  const result = subscribeFrameSchema.safeParse(frame);
-
-  if (!result.success) {
-    closeWithError(client, 'protocol_error', 'INVALID_FRAME', 'Invalid frame', 1007);
-    return;
-  }
-
-  const conversationIds = [...new Set(result.data.conversationIds)];
-
-  if (conversationIds.length > maxSubscriptions) {
-    closeWithError(
-      client,
-      'subscription_error',
-      'TOO_MANY_SUBSCRIPTIONS',
-      'Too many subscriptions',
-      1008
-    );
-    return;
-  }
-
-  if (!client.userId) {
-    closeWithError(
-      client,
-      'auth_error',
-      'AUTHENTICATION_REQUIRED',
-      'Authentication required',
-      1008
-    );
-    return;
-  }
-
-  let authorized: boolean;
-
-  try {
-    authorized =
-      !conversationIds.length || (await canAccessConversations(client.userId, conversationIds));
-  } catch (error) {
-    client.reportError(error);
-    closeWithError(client, 'server_error', 'AUTHORIZATION_UNAVAILABLE', 'Server error', 1011);
-    return;
-  }
-
-  if (!authorized) {
-    closeWithError(client, 'subscription_error', 'FORBIDDEN', 'Subscription forbidden', 1008);
-    return;
-  }
-
-  if (client.readyState !== WebSocket.OPEN) return;
-
-  client.subscriptions = new Set(conversationIds);
-  sendJson(client, { type: 'subscribed', conversationIds });
+  return authenticatedUser.userId;
 }
 
 async function handleFrame(
   client: Client,
   raw: RawData,
   isBinary: boolean,
-  options: Required<
-    Pick<WsHubOptions, 'verifyAccessToken' | 'canAccessConversations' | 'maxSubscriptions'>
-  >
+  verifyAccessToken: WsHubOptions['verifyAccessToken'],
+  registerAuthenticatedClient: (client: Client, userId: number) => void
 ): Promise<void> {
   if (isBinary) {
     closeWithError(client, 'protocol_error', 'TEXT_FRAMES_ONLY', 'Text frames only', 1003);
@@ -208,31 +149,26 @@ async function handleFrame(
     return;
   }
 
-  if (!client.authenticated) {
-    await authenticateClient(client, frame, options.verifyAccessToken);
+  if (client.authenticated) {
+    closeWithError(client, 'protocol_error', 'UNEXPECTED_FRAME', 'Unexpected frame', 1008);
     return;
   }
 
-  await updateSubscriptions(
-    client,
-    frame,
-    options.canAccessConversations,
-    options.maxSubscriptions
-  );
+  const userId = await authenticateClient(client, frame, verifyAccessToken);
+  if (userId) registerAuthenticatedClient(client, userId);
 }
 
 export function attachWs(server: Server, options: WsHubOptions): WsHub {
   const verifyAccessToken = options.verifyAccessToken;
-  const canAccessConversations = options.canAccessConversations;
   const authTimeoutMs = options.authTimeoutMs ?? defaultAuthTimeoutMs;
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? defaultHeartbeatIntervalMs;
   const maxPayloadBytes = options.maxPayloadBytes ?? defaultMaxPayloadBytes;
-  const maxSubscriptions = options.maxSubscriptions ?? defaultMaxSubscriptions;
   const maxBufferedAmountBytes = options.maxBufferedAmountBytes ?? defaultMaxBufferedAmountBytes;
   const maxPendingFrames = options.maxPendingFrames ?? defaultMaxPendingFrames;
   const reportError = options.onError ?? (error => console.error('WebSocket error', error));
   const hubClients = new Set<Client>();
-  const wss = new WebSocketServer({
+  const clientsByUserId = new Map<number, Set<Client>>();
+  const webSocketServer = new WebSocketServer({
     server,
     maxPayload: maxPayloadBytes,
     perMessageDeflate: false
@@ -240,13 +176,23 @@ export function attachWs(server: Server, options: WsHubOptions): WsHub {
 
   const cleanup = (client: Client): void => {
     clearAuthenticationTimer(client);
-    client.subscriptions.clear();
     hubClients.delete(client);
+
+    if (!client.userId) return;
+
+    const userClients = clientsByUserId.get(client.userId);
+    userClients?.delete(client);
+    if (!userClients?.size) clientsByUserId.delete(client.userId);
   };
 
-  wss.on('connection', (socket: WebSocket) => {
+  const registerAuthenticatedClient = (client: Client, userId: number): void => {
+    const userClients = clientsByUserId.get(userId) ?? new Set<Client>();
+    userClients.add(client);
+    clientsByUserId.set(userId, userClients);
+  };
+
+  webSocketServer.on('connection', (socket: WebSocket) => {
     const client = socket as Client;
-    client.subscriptions = new Set();
     client.authenticated = false;
     client.isAlive = true;
     client.messageQueue = Promise.resolve();
@@ -282,11 +228,7 @@ export function attachWs(server: Server, options: WsHubOptions): WsHub {
       client.messageQueue = client.messageQueue
         .then(async () => {
           if (client.readyState !== WebSocket.OPEN) return;
-          await handleFrame(client, raw, isBinary, {
-            verifyAccessToken,
-            canAccessConversations,
-            maxSubscriptions
-          });
+          await handleFrame(client, raw, isBinary, verifyAccessToken, registerAuthenticatedClient);
         })
         .catch(error => {
           reportError(error);
@@ -325,27 +267,18 @@ export function attachWs(server: Server, options: WsHubOptions): WsHub {
   }, heartbeatIntervalMs);
   heartbeatTimer.unref();
 
-  wss.on('close', () => clearInterval(heartbeatTimer));
+  webSocketServer.on('close', () => clearInterval(heartbeatTimer));
 
-  const broadcast = (conversationId: number, payload: unknown): void => {
+  const deliver = (recipientUserIds: readonly number[], payload: unknown): void => {
     const data = JSON.stringify(payload);
 
-    for (const client of hubClients) {
-      if (!client.authenticated || !client.subscriptions.has(conversationId)) continue;
-      if (client.readyState !== WebSocket.OPEN) continue;
+    for (const userId of new Set(recipientUserIds)) {
+      const userClients = clientsByUserId.get(userId);
+      if (!userClients) continue;
 
-      if (client.bufferedAmount > client.maxBufferedAmountBytes) {
-        client.terminate();
-        continue;
-      }
-
-      client.send(data, error => {
-        if (!error) return;
-        client.reportError(error);
-        client.terminate();
-      });
+      for (const client of userClients) sendSerialized(client, data);
     }
   };
 
-  return { webSocketServer: wss, broadcast };
+  return { webSocketServer, deliver };
 }

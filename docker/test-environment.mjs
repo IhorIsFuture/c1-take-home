@@ -22,6 +22,7 @@ const testEnvironment = {
   MYSQL_URL: 'mysql://relay_test:relay_test@127.0.0.1:13306/relay_test?charset=utf8mb4',
   MONGO_URL: 'mongodb://127.0.0.1:27018/relay_test',
   REDIS_URL: 'redis://127.0.0.1:16379/15',
+  REDIS_NAMESPACE: 'relay-test',
   BCRYPT_COST: '10',
   JWT_ACCESS_SECRET: 'relay-test-access-secret-with-at-least-32-characters',
   JWT_ISSUER: 'relay-test-api',
@@ -30,7 +31,11 @@ const testEnvironment = {
   REFRESH_TOKEN_TTL_SECONDS: '3600',
   DEMO_USER_PASSWORD: 'RelayTest123!',
   TEST_BASE_URL: 'http://127.0.0.1:13000',
-  TEST_WS_URL: 'ws://127.0.0.1:13000'
+  TEST_WS_URL: 'ws://127.0.0.1:13000',
+  TEST_PRIMARY_BASE_URL: 'http://127.0.0.1:13001',
+  TEST_PRIMARY_WS_URL: 'ws://127.0.0.1:13001',
+  TEST_SECONDARY_BASE_URL: 'http://127.0.0.1:13002',
+  TEST_SECONDARY_WS_URL: 'ws://127.0.0.1:13002'
 };
 const readinessTimeoutMs = 30_000;
 const readinessRequestTimeoutMs = 2_000;

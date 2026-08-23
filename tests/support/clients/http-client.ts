@@ -30,7 +30,7 @@ function getSetCookieHeaders(headers: Headers): string[] {
 export class TestHttpClient {
   private readonly cookies = new Map<string, string>();
 
-  constructor(private readonly baseUrl = testEnvironment.baseUrl) {}
+  constructor(private readonly baseUrl: string = testEnvironment.baseUrl) {}
 
   async request<Body>(
     path: string,
