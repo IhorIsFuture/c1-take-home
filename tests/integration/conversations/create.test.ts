@@ -62,7 +62,7 @@ describe('POST /api/conversations', () => {
 
   it('reports all participant ids that do not exist', async () => {
     const actor = await createRegisteredUser();
-    const missingParticipantIds = [999_998, 999_999];
+    const missingParticipantIds = [999998, 999999];
     const response = await actor.client.request<ApiErrorResponse>('/api/conversations', {
       method: 'POST',
       accessToken: actor.auth.accessToken,

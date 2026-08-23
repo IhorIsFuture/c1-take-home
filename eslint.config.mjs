@@ -47,6 +47,13 @@ export default tseslint.config(
       eqeqeq: ['error', 'always'],
       'no-var': 'error',
       'prefer-const': 'error',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[raw=/[0-9]_[0-9]/]',
+          message: 'Write numeric literals without separators.'
+        }
+      ],
       '@typescript-eslint/no-unused-vars': [
         'error',
         {

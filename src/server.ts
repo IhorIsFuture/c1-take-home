@@ -10,8 +10,8 @@ import { RedisRealtimePubSub } from './realtime/index';
 import { verifyAccessToken } from './security/access-token';
 import { attachWs } from './ws/hub';
 
-const shutdownGracePeriodMs = 5_000;
-const readinessTimeoutMs = 2_500;
+const shutdownGracePeriodMs = 5000;
+const readinessTimeoutMs = 2500;
 
 export interface StartServerOptions {
   port?: number;

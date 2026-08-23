@@ -48,7 +48,7 @@ export async function verifyAccessToken(accessToken: string): Promise<VerifiedAu
     return {
       userId,
       sessionId,
-      accessTokenExpiresAt: new Date(expiresAtSeconds * 1_000)
+      accessTokenExpiresAt: new Date(expiresAtSeconds * 1000)
     };
   } catch {
     return null;

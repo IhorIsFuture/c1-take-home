@@ -64,7 +64,7 @@ describe('message access control', () => {
 
   it('returns the same hidden response for a conversation that does not exist', async () => {
     const actor = await createRegisteredUser();
-    const conversationId = 999_999;
+    const conversationId = 999999;
     const createResponse = await actor.client.request<ApiErrorResponse>('/api/messages', {
       method: 'POST',
       accessToken: actor.auth.accessToken,

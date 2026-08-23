@@ -54,7 +54,7 @@ export class TestWebSocketClient {
     return client;
   }
 
-  waitForFrame<Frame>(predicate: (frame: unknown) => boolean, timeoutMs = 2_000): Promise<Frame> {
+  waitForFrame<Frame>(predicate: (frame: unknown) => boolean, timeoutMs = 2000): Promise<Frame> {
     const frameIndex = this.frames.findIndex(predicate);
 
     if (frameIndex >= 0) {
@@ -101,7 +101,7 @@ export class TestWebSocketClient {
     });
   }
 
-  waitForClose(timeoutMs = 5_000): Promise<WebSocketCloseFrame> {
+  waitForClose(timeoutMs = 5000): Promise<WebSocketCloseFrame> {
     if (this.closeFrame) return Promise.resolve(this.closeFrame);
 
     return new Promise((resolve, reject) => {

@@ -2,12 +2,12 @@ import type { Server } from 'node:http';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { authenticateFrameSchema } from './protocol';
 
-const defaultAuthTimeoutMs = 5_000;
-const defaultHeartbeatIntervalMs = 30_000;
+const defaultAuthTimeoutMs = 5000;
+const defaultHeartbeatIntervalMs = 30000;
 const defaultMaxPayloadBytes = 16 * 1024;
 const defaultMaxBufferedAmountBytes = 1024 * 1024;
 const defaultMaxPendingFrames = 32;
-const maxTimerDelayMs = 2_147_483_647;
+const maxTimerDelayMs = 2147483647;
 
 export interface WsAuthenticatedUser {
   userId: number;

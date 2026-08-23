@@ -14,7 +14,7 @@ export interface StoredMessageBody {
 async function getConnection(): Promise<Connection> {
   connection ??= await mongoose
     .createConnection(testEnvironment.mongoUrl, {
-      serverSelectionTimeoutMS: 5_000
+      serverSelectionTimeoutMS: 5000
     })
     .asPromise();
 

@@ -8,7 +8,7 @@ export async function createAccessTokenExpiringIn(
   userId: number,
   lifetimeSeconds: number
 ): Promise<string> {
-  const now = Math.floor(Date.now() / 1_000);
+  const now = Math.floor(Date.now() / 1000);
 
   return new SignJWT({ sessionId: randomUUID() })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })

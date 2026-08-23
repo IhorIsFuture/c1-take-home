@@ -22,7 +22,7 @@ function hasFrameType(type: string): (frame: unknown) => boolean {
   return frame => !!frame && typeof frame === 'object' && 'type' in frame && frame.type === type;
 }
 
-async function waitForReady(baseUrl: string, timeoutMs = 10_000): Promise<void> {
+async function waitForReady(baseUrl: string, timeoutMs = 10000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
@@ -117,7 +117,7 @@ describe('multi-instance realtime', () => {
     try {
       const unavailable = participantSocket.waitForFrame(
         hasFrameType('realtime_unavailable'),
-        10_000
+        10000
       );
       await stopRedisTestService();
       redisStopped = true;
@@ -136,10 +136,7 @@ describe('multi-instance realtime', () => {
 
       expect(failedPublish.status).toBe(500);
 
-      const resyncRequired = participantSocket.waitForFrame(
-        hasFrameType('resync_required'),
-        10_000
-      );
+      const resyncRequired = participantSocket.waitForFrame(hasFrameType('resync_required'), 10000);
       await startRedisTestService();
       redisStopped = false;
       await expect(resyncRequired).resolves.toEqual({ type: 'resync_required' });
@@ -165,7 +162,7 @@ describe('multi-instance realtime', () => {
       if (redisStopped) await startRedisTestService();
       await participantSocket.close();
     }
-  }, 30_000);
+  }, 30000);
 
   it('closes an authenticated socket when its access token expires', async () => {
     const user = await createRegisteredUser();
@@ -178,9 +175,9 @@ describe('multi-instance realtime', () => {
     try {
       const authError = socket.waitForFrame<{ type: string; code: string }>(
         hasFrameType('auth_error'),
-        5_000
+        5000
       );
-      const closed = socket.waitForClose(5_000);
+      const closed = socket.waitForClose(5000);
 
       await expect(authError).resolves.toEqual({
         type: 'auth_error',

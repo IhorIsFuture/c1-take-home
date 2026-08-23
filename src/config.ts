@@ -3,7 +3,7 @@ import { z } from 'zod';
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   TEST_ENV_GUARD: z.literal('relay-test').optional(),
-  PORT: z.coerce.number().int().positive().max(65_535).default(3000),
+  PORT: z.coerce.number().int().positive().max(65535).default(3000),
   MYSQL_URL: z.string().min(1).default('mysql://root:root@mysql:3306/relay?charset=utf8mb4'),
   MONGO_URL: z.string().min(1).default('mongodb://mongo:27017/relay'),
   REDIS_URL: z.string().min(1).default('redis://redis:6379'),

@@ -23,7 +23,7 @@ function readPositiveInteger(value, fallback, name) {
 
 const firstConversationId = readPositiveInteger(
   __ENV.K6_FIRST_CONVERSATION_ID,
-  10_000,
+  10000,
   'K6_FIRST_CONVERSATION_ID'
 );
 const userCount = readPositiveInteger(__ENV.K6_USER_COUNT, 100, 'K6_USER_COUNT');

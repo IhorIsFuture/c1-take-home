@@ -38,12 +38,12 @@ const testEnvironment = {
   TEST_SECONDARY_WS_URL: 'ws://127.0.0.1:13002',
   TEST_ENVOY_ADMIN_URL: 'http://127.0.0.1:19902'
 };
-const readinessTimeoutMs = 30_000;
-const readinessRequestTimeoutMs = 2_000;
+const readinessTimeoutMs = 30000;
+const readinessRequestTimeoutMs = 2000;
 const readinessPollIntervalMs = 250;
-const cleanupTimeoutMs = 60_000;
-const testCommandTimeoutMs = 15 * 60_000;
-const forceKillDelayMs = 5_000;
+const cleanupTimeoutMs = 60000;
+const testCommandTimeoutMs = 15 * 60000;
+const forceKillDelayMs = 5000;
 
 let activeChild;
 let receivedSignal;

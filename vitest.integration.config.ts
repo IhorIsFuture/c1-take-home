@@ -8,8 +8,8 @@ export default defineConfig({
     globals: false,
     isolate: true,
     fileParallelism: false,
-    testTimeout: 10_000,
-    hookTimeout: 30_000,
+    testTimeout: 10000,
+    hookTimeout: 30000,
     clearMocks: true,
     restoreMocks: true
   }
