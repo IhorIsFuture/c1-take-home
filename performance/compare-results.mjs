@@ -6,8 +6,22 @@ import { inspect, isDeepStrictEqual } from 'node:util';
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const resultsDirectory = resolve(projectDirectory, 'performance', 'results');
 const endpointNames = ['conversation_list', 'message_list', 'user_search', 'message_create'];
-const profileNames = new Set(['smoke', 'baseline', 'load', 'stress']);
-const supportedSchemaVersions = new Set([1, 2]);
+const websocketLatencyMetrics = [
+  ['connection', 'ws_connecting'],
+  ['authentication', 'ws_authentication_duration'],
+  ['message_create', 'ws_message_create_duration'],
+  ['delivery', 'ws_delivery_latency']
+];
+const profileNames = new Set([
+  'smoke',
+  'baseline',
+  'load',
+  'stress',
+  'websocket-smoke',
+  'websocket-baseline',
+  'websocket-load'
+]);
+const supportedSchemaVersions = new Set([1, 2, 3]);
 const arguments_ = process.argv.slice(2);
 const forceColor = process.env.FORCE_COLOR;
 const colorsEnabled =
@@ -83,6 +97,10 @@ function methodologyVersion(result) {
   return result.methodologyVersion ?? result.schemaVersion;
 }
 
+function workload(result) {
+  return result.run.workload ?? 'http';
+}
+
 function comparabilityDifferences(before, after) {
   const differences = [];
 
@@ -90,6 +108,7 @@ function comparabilityDifferences(before, after) {
     differences.push('methodology version');
   }
 
+  if (workload(before) !== workload(after)) differences.push('workload');
   if (before.run.profile !== after.run.profile) differences.push('profile');
   if (before.run.apiReplicas !== after.run.apiReplicas) differences.push('API replica count');
   if (before.run.baseUrl !== after.run.baseUrl) differences.push('base URL');
@@ -308,11 +327,11 @@ function formatLatencyChange(beforeValue, afterValue) {
   return colorize(formattedSlowdown, 'yellow');
 }
 
-function latencyRow(label, before, after, endpoint) {
-  const beforeMedian = readMetricValue(before, 'http_req_duration', 'med', endpoint);
-  const afterMedian = readMetricValue(after, 'http_req_duration', 'med', endpoint);
-  const beforeP95 = readMetricValue(before, 'http_req_duration', 'p(95)', endpoint);
-  const afterP95 = readMetricValue(after, 'http_req_duration', 'p(95)', endpoint);
+function latencyRow(label, before, after, metricName, endpoint) {
+  const beforeMedian = readMetricValue(before, metricName, 'med', endpoint);
+  const afterMedian = readMetricValue(after, metricName, 'med', endpoint);
+  const beforeP95 = readMetricValue(before, metricName, 'p(95)', endpoint);
+  const afterP95 = readMetricValue(after, metricName, 'p(95)', endpoint);
 
   return {
     metric: label,
@@ -325,8 +344,8 @@ function latencyRow(label, before, after, endpoint) {
     'after p95 ms': roundedOrNull(afterP95),
     'p95 change': formatLatencyChange(beforeP95, afterP95),
     'delta p95 ms': beforeP95 === null || afterP95 === null ? null : round(afterP95 - beforeP95),
-    'before samples': readMetricValue(before, 'http_req_duration', 'count', endpoint),
-    'after samples': readMetricValue(after, 'http_req_duration', 'count', endpoint)
+    'before samples': readMetricValue(before, metricName, 'count', endpoint),
+    'after samples': readMetricValue(after, metricName, 'count', endpoint)
   };
 }
 
@@ -334,7 +353,7 @@ function percentage(value) {
   return value === null ? null : `${round(value * 100)}%`;
 }
 
-function runRow(label, file) {
+function httpRunRow(label, file) {
   const result = file.result;
 
   return {
@@ -349,8 +368,30 @@ function runRow(label, file) {
   };
 }
 
+function overallMetricValue(result, metricName, valueName) {
+  return result.metrics[metricName]?.values?.[valueName] ?? null;
+}
+
+function websocketRunRow(label, file) {
+  const result = file.result;
+
+  return {
+    run: label,
+    generated: result.generatedAt,
+    commit: `${result.run.gitCommit ?? 'unknown'}${result.run.gitDirty ? ' dirty' : ''}`,
+    thresholds: result.thresholdsPassed ? 'passed' : 'failed',
+    sessions: readMetricValue(result, 'ws_sessions', 'count'),
+    created: overallMetricValue(result, 'ws_messages_created', 'count'),
+    deliveries: overallMetricValue(result, 'ws_deliveries_received', 'count'),
+    'delivery success': percentage(readMetricValue(result, 'ws_delivery_success', 'rate')),
+    disconnects: readMetricValue(result, 'ws_unexpected_disconnects', 'count'),
+    duplicates: readMetricValue(result, 'ws_duplicate_deliveries', 'count')
+  };
+}
+
 function reliabilityWarnings(before, after, latencyRows) {
   const warnings = [];
+  const resultWorkload = workload(before);
 
   for (const [label, result] of [
     ['before', before],
@@ -359,9 +400,31 @@ function reliabilityWarnings(before, after, latencyRows) {
     if (result.run.gitDirty) warnings.push(`${label} run used a dirty git worktree`);
     if (!result.thresholdsPassed) warnings.push(`${label} run failed one or more thresholds`);
 
-    const failures = readMetricValue(result, 'http_req_failed', 'rate');
-    if (failures) warnings.push(`${label} run contains failed HTTP requests`);
-    if (readDroppedIterations(result)) warnings.push(`${label} run contains dropped iterations`);
+    if (resultWorkload === 'http') {
+      const failures = readMetricValue(result, 'http_req_failed', 'rate');
+      if (failures) warnings.push(`${label} run contains failed HTTP requests`);
+      if (readDroppedIterations(result)) warnings.push(`${label} run contains dropped iterations`);
+      continue;
+    }
+
+    if (readMetricValue(result, 'ws_authentication_success', 'rate') < 1) {
+      warnings.push(`${label} run contains failed WebSocket authentications`);
+    }
+    if (readMetricValue(result, 'ws_message_create_success', 'rate') < 1) {
+      warnings.push(`${label} run contains failed message creations`);
+    }
+    if (readMetricValue(result, 'ws_delivery_success', 'rate') < 1) {
+      warnings.push(`${label} run contains missed sender deliveries`);
+    }
+    if (readMetricValue(result, 'ws_unexpected_disconnects', 'count')) {
+      warnings.push(`${label} run contains unexpected WebSocket disconnects`);
+    }
+    if (readMetricValue(result, 'ws_duplicate_deliveries', 'count')) {
+      warnings.push(`${label} run contains duplicate WebSocket deliveries`);
+    }
+    if (readMetricValue(result, 'ws_protocol_errors', 'count')) {
+      warnings.push(`${label} run contains WebSocket protocol errors`);
+    }
   }
 
   if (latencyRows.some(row => row['before samples'] === null || row['after samples'] === null)) {
@@ -373,24 +436,37 @@ function reliabilityWarnings(before, after, latencyRows) {
 
 const selection = await selectResults();
 assertComparable(selection.before.result, selection.after.result);
-
-const rows = [
-  latencyRow('overall', selection.before.result, selection.after.result),
-  ...endpointNames.map(endpoint =>
-    latencyRow(endpoint, selection.before.result, selection.after.result, endpoint)
-  )
-];
+const selectedWorkload = workload(selection.before.result);
+const rows =
+  selectedWorkload === 'websocket'
+    ? websocketLatencyMetrics.map(([label, metricName]) =>
+        latencyRow(label, selection.before.result, selection.after.result, metricName)
+      )
+    : [
+        latencyRow('overall', selection.before.result, selection.after.result, 'http_req_duration'),
+        ...endpointNames.map(endpoint =>
+          latencyRow(
+            endpoint,
+            selection.before.result,
+            selection.after.result,
+            'http_req_duration',
+            endpoint
+          )
+        )
+      ];
 const warnings = [
   ...selection.warnings,
   ...reliabilityWarnings(selection.before.result, selection.after.result, rows)
 ];
 
 console.log(`Selection: ${selection.mode}`);
+console.log(`Workload: ${selectedWorkload}`);
 console.log(`Profile: ${selection.before.result.run.profile}`);
 console.log(`API replicas: ${selection.before.result.run.apiReplicas}`);
 console.log(`Before: ${selection.before.displayPath}`);
 console.log(`After: ${selection.after.displayPath}`);
-console.table([runRow('before', selection.before), runRow('after', selection.after)]);
+const createRunRow = selectedWorkload === 'websocket' ? websocketRunRow : httpRunRow;
+console.table([createRunRow('before', selection.before), createRunRow('after', selection.after)]);
 console.table(rows);
 
 for (const warning of warnings) console.warn(`Warning: ${warning}`);
