@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getPerformanceProfile } from '../tests/performance/profiles.js';
+import { getWebSocketPerformanceProfile } from '../tests/performance/websocket-profiles.js';
 
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const resultsDirectory = resolve(projectDirectory, 'performance', 'results');
@@ -14,8 +15,14 @@ const composeArguments = [
   '-f',
   'docker-compose.perf.yml'
 ];
-const supportedProfiles = new Set(['smoke', 'baseline', 'load', 'stress']);
-const profile = process.argv[2] || 'baseline';
+const httpProfiles = new Set(['smoke', 'baseline', 'load', 'stress']);
+const websocketProfiles = new Set(['smoke', 'baseline', 'load']);
+const requestedProfile = process.argv[2] || 'baseline';
+const websocketProfilePrefix = 'websocket-';
+const websocketWorkload = requestedProfile.startsWith(websocketProfilePrefix);
+const profile = websocketWorkload
+  ? requestedProfile.slice(websocketProfilePrefix.length)
+  : requestedProfile;
 const apiReplicas = Number(process.env.PERF_API_REPLICAS ?? 2);
 const userCount = Number(process.env.PERF_USER_COUNT ?? 100);
 const conversationCount = Number(process.env.PERF_CONVERSATION_COUNT ?? 200);
@@ -28,10 +35,17 @@ const cleanupTimeoutMs = 90000;
 const testTimeoutMs = 20 * 60000;
 const forceKillDelayMs = 5000;
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
-const resultFileName = `${runId}-${profile}.json`;
+const resultFileName = `${runId}-${requestedProfile}.json`;
 
-if (!supportedProfiles.has(profile)) {
-  throw new Error(`Performance profile must be one of: ${[...supportedProfiles].join(', ')}`);
+if (
+  (!websocketWorkload && !httpProfiles.has(profile)) ||
+  (websocketWorkload && !websocketProfiles.has(profile))
+) {
+  const supportedProfiles = [
+    ...httpProfiles,
+    ...[...websocketProfiles].map(name => `${websocketProfilePrefix}${name}`)
+  ];
+  throw new Error(`Performance profile must be one of: ${supportedProfiles.join(', ')}`);
 }
 
 if (!Number.isInteger(apiReplicas) || apiReplicas < 1 || apiReplicas > 8) {
@@ -58,7 +72,9 @@ if (conversationCount * messagesPerConversation > 100000) {
   throw new Error('Performance dataset cannot exceed 100000 messages');
 }
 
-const profileConfiguration = getPerformanceProfile(profile);
+const profileConfiguration = websocketWorkload
+  ? getWebSocketPerformanceProfile(profile)
+  : getPerformanceProfile(profile);
 
 let activeChild;
 let receivedSignal;
@@ -191,6 +207,8 @@ async function runK6Profile(testProfile, metadata, resultFile) {
     '-e',
     'K6_BASE_URL=http://envoy:3000',
     '-e',
+    'K6_WS_BASE_URL=ws://envoy:3000/',
+    '-e',
     'K6_USER_EMAIL=performance-user-1@example.com',
     '-e',
     'K6_USER_PASSWORD=RelayPerf123!',
@@ -233,7 +251,7 @@ async function runK6Profile(testProfile, metadata, resultFile) {
       ...environmentArguments,
       'k6',
       'run',
-      '/scripts/workload.js'
+      websocketWorkload ? '/scripts/websocket-workload.js' : '/scripts/workload.js'
     ],
     { processGroup: true, timeoutMs: testTimeoutMs }
   );
