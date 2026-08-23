@@ -35,7 +35,8 @@ const testEnvironment = {
   TEST_PRIMARY_BASE_URL: 'http://127.0.0.1:13001',
   TEST_PRIMARY_WS_URL: 'ws://127.0.0.1:13001',
   TEST_SECONDARY_BASE_URL: 'http://127.0.0.1:13002',
-  TEST_SECONDARY_WS_URL: 'ws://127.0.0.1:13002'
+  TEST_SECONDARY_WS_URL: 'ws://127.0.0.1:13002',
+  TEST_ENVOY_ADMIN_URL: 'http://127.0.0.1:19902'
 };
 const readinessTimeoutMs = 30_000;
 const readinessRequestTimeoutMs = 2_000;
@@ -173,7 +174,17 @@ async function runTestEnvironment() {
   try {
     await run(
       'docker',
-      [...composeArguments, 'up', '--detach', '--build', '--wait', '--wait-timeout', '180'],
+      [
+        ...composeArguments,
+        'up',
+        '--detach',
+        '--build',
+        '--scale',
+        'api=2',
+        '--wait',
+        '--wait-timeout',
+        '180'
+      ],
       { environment: dockerEnvironment }
     );
     await waitForReadiness();

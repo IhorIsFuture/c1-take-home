@@ -3,6 +3,7 @@ export function createRelaySocket({
   refreshAccessToken,
   onAuthenticationFailed,
   onMessage,
+  onResyncRequired,
   onStatus
 }) {
   let socket;
@@ -11,6 +12,7 @@ export function createRelaySocket({
   let authenticationFailed = false;
   let authenticationRecoveryAttempted = false;
   let recoveringAuthentication = false;
+  let hasAuthenticated = false;
   let stopped = false;
 
   function scheduleReconnect() {
@@ -18,7 +20,8 @@ export function createRelaySocket({
 
     if (stopped || authenticationFailed) return;
 
-    const delay = Math.min(1000 * 2 ** reconnectAttempt, 10000);
+    const maximumDelay = Math.min(1000 * 2 ** reconnectAttempt, 10000);
+    const delay = maximumDelay / 2 + Math.random() * (maximumDelay / 2);
     reconnectAttempt += 1;
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(connect, delay);
@@ -78,9 +81,23 @@ export function createRelaySocket({
       }
 
       if (message.type === 'authenticated') {
+        const reconnected = hasAuthenticated;
+        hasAuthenticated = true;
         authenticationRecoveryAttempted = false;
         reconnectAttempt = 0;
         onStatus('online');
+        if (reconnected) onResyncRequired?.();
+        return;
+      }
+
+      if (message.type === 'realtime_unavailable') {
+        onStatus('offline');
+        return;
+      }
+
+      if (message.type === 'resync_required') {
+        onStatus('online');
+        onResyncRequired?.();
         return;
       }
 

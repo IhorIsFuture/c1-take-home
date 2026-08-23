@@ -7,6 +7,10 @@ export interface AuthContext {
   sessionId: string;
 }
 
+export interface VerifiedAuthContext extends AuthContext {
+  accessTokenExpiresAt: Date;
+}
+
 const secret = new TextEncoder().encode(config.auth.accessTokenSecret);
 
 export async function createAccessToken(auth: AuthContext): Promise<string> {
@@ -21,7 +25,7 @@ export async function createAccessToken(auth: AuthContext): Promise<string> {
     .sign(secret);
 }
 
-export async function verifyAccessToken(accessToken: string): Promise<AuthContext | null> {
+export async function verifyAccessToken(accessToken: string): Promise<VerifiedAuthContext | null> {
   try {
     const { payload } = await jwtVerify(accessToken, secret, {
       algorithms: ['HS256'],
@@ -30,10 +34,22 @@ export async function verifyAccessToken(accessToken: string): Promise<AuthContex
     });
     const userId = Number(payload.sub);
     const sessionId = payload.sessionId;
+    const expiresAtSeconds = payload.exp;
 
-    if (!Number.isSafeInteger(userId) || userId <= 0 || typeof sessionId !== 'string') return null;
+    if (
+      !Number.isSafeInteger(userId) ||
+      userId <= 0 ||
+      typeof sessionId !== 'string' ||
+      typeof expiresAtSeconds !== 'number'
+    ) {
+      return null;
+    }
 
-    return { userId, sessionId };
+    return {
+      userId,
+      sessionId,
+      accessTokenExpiresAt: new Date(expiresAtSeconds * 1_000)
+    };
   } catch {
     return null;
   }

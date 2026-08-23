@@ -7,6 +7,11 @@ interface FrameWaiter<Frame = unknown> {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+export interface WebSocketCloseFrame {
+  code: number;
+  reason: string;
+}
+
 function decodeFrame(raw: RawData): unknown {
   const value = Array.isArray(raw)
     ? Buffer.concat(raw).toString('utf8')
@@ -20,10 +25,14 @@ function decodeFrame(raw: RawData): unknown {
 export class TestWebSocketClient {
   private readonly frames: unknown[] = [];
   private readonly waiters = new Set<FrameWaiter>();
+  private closeFrame?: WebSocketCloseFrame;
 
   private constructor(private readonly socket: WebSocket) {
     socket.on('message', raw => this.handleFrame(raw));
-    socket.on('close', () => this.rejectWaiters(new Error('WebSocket closed')));
+    socket.on('close', (code, reason) => {
+      this.closeFrame = { code, reason: reason.toString('utf8') };
+      this.rejectWaiters(new Error('WebSocket closed'));
+    });
     socket.on('error', error => this.rejectWaiters(error));
   }
 
@@ -89,6 +98,22 @@ export class TestWebSocketClient {
       };
 
       this.waiters.add(waiter);
+    });
+  }
+
+  waitForClose(timeoutMs = 5_000): Promise<WebSocketCloseFrame> {
+    if (this.closeFrame) return Promise.resolve(this.closeFrame);
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error(`WebSocket did not close within ${timeoutMs}ms`)),
+        timeoutMs
+      );
+
+      this.socket.once('close', (code, reason) => {
+        clearTimeout(timeout);
+        resolve({ code, reason: reason.toString('utf8') });
+      });
     });
   }
 

@@ -155,10 +155,12 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   let dependencyReadinessCheck: Promise<boolean> | undefined;
   const connections = { mongo: false, mysql: false, redis: false };
   const server = http.createServer();
-  const { webSocketServer, deliver } = attachWs(server, { verifyAccessToken });
+  const { webSocketServer, deliver, broadcast } = attachWs(server, { verifyAccessToken });
   const realtimePubSub = new RedisRealtimePubSub({
     url: config.redisUrl,
-    namespace: config.redisNamespace
+    namespace: config.redisNamespace,
+    onSubscriberUnavailable: () => broadcast({ type: 'realtime_unavailable' }),
+    onSubscriberRecovered: () => broadcast({ type: 'resync_required' })
   });
   const app = createApp({
     realtimePublisher: realtimePubSub,

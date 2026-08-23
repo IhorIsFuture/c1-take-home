@@ -104,29 +104,6 @@ services:
       retries: 30
       start_period: 5s
 
-  api-secondary:
-    <<: *test-app
-    command: ['node', '--import', 'tsx', 'src/index.ts']
-    restart: 'no'
-    expose: ['3000']
-    depends_on:
-      seed:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "fetch('http://127.0.0.1:3000/health/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
-        ]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-      start_period: 5s
-
   envoy:
     image: envoyproxy/envoy:v1.31.10
     expose: ['3000']
@@ -135,8 +112,6 @@ services:
         target: /etc/envoy/envoy.yaml
     depends_on:
       api:
-        condition: service_healthy
-      api-secondary:
         condition: service_healthy
 
 volumes:

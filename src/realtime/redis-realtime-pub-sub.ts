@@ -39,11 +39,14 @@ const messageCreatedEnvelopeSchema = z
   .strict();
 
 type RedisClient = ReturnType<typeof createClient>;
+type RedisSubscriberLifecycleHook = () => void | Promise<void>;
 
 export interface RedisRealtimePubSubOptions {
   url: string;
   namespace: string;
   onError?: (error: unknown) => void;
+  onSubscriberUnavailable?: RedisSubscriberLifecycleHook;
+  onSubscriberRecovered?: RedisSubscriberLifecycleHook;
 }
 
 function serializeDelivery(delivery: RealtimeDelivery): string {
@@ -78,20 +81,27 @@ export class RedisRealtimePubSub implements RealtimePublisher {
   private readonly publisher: RedisClient;
   private readonly subscriber: RedisClient;
   private readonly reportError: (error: unknown) => void;
+  private readonly onSubscriberUnavailable?: RedisSubscriberLifecycleHook;
+  private readonly onSubscriberRecovered?: RedisSubscriberLifecycleHook;
   private readonly channel: string;
   private readonly eventKeyPrefix: string;
   private listener?: RealtimeListener;
   private startPromise?: Promise<void>;
   private closePromise?: Promise<void>;
+  private subscriberUnavailable = false;
 
   constructor(options: RedisRealtimePubSubOptions) {
     this.publisher = createClient({ url: options.url });
     this.subscriber = this.publisher.duplicate();
     this.reportError = options.onError ?? (error => console.error('Redis realtime error', error));
+    this.onSubscriberUnavailable = options.onSubscriberUnavailable;
+    this.onSubscriberRecovered = options.onSubscriberRecovered;
     this.channel = `${options.namespace}:realtime:v1`;
     this.eventKeyPrefix = `${options.namespace}:realtime:published`;
     this.publisher.on('error', this.reportError);
     this.subscriber.on('error', this.reportError);
+    this.subscriber.on('reconnecting', () => this.handleSubscriberUnavailable());
+    this.subscriber.on('ready', () => this.handleSubscriberRecovered());
   }
 
   start(listener: RealtimeListener): Promise<void> {
@@ -154,6 +164,23 @@ export class RedisRealtimePubSub implements RealtimePublisher {
     }
 
     Promise.resolve(this.listener?.(delivery)).catch(this.reportError);
+  }
+
+  private handleSubscriberUnavailable(): void {
+    if (this.subscriberUnavailable) return;
+    this.subscriberUnavailable = true;
+    this.runLifecycleHook(this.onSubscriberUnavailable);
+  }
+
+  private handleSubscriberRecovered(): void {
+    if (!this.subscriberUnavailable) return;
+    this.subscriberUnavailable = false;
+    this.runLifecycleHook(this.onSubscriberRecovered);
+  }
+
+  private runLifecycleHook(hook?: RedisSubscriberLifecycleHook): void {
+    if (!hook) return;
+    void Promise.resolve().then(hook).catch(this.reportError);
   }
 
   private async disconnect(): Promise<void> {

@@ -7,9 +7,11 @@ const defaultHeartbeatIntervalMs = 30_000;
 const defaultMaxPayloadBytes = 16 * 1024;
 const defaultMaxBufferedAmountBytes = 1024 * 1024;
 const defaultMaxPendingFrames = 32;
+const maxTimerDelayMs = 2_147_483_647;
 
 export interface WsAuthenticatedUser {
   userId: number;
+  accessTokenExpiresAt: Date;
 }
 
 export interface WsHubOptions {
@@ -25,6 +27,7 @@ export interface WsHubOptions {
 export interface WsHub {
   webSocketServer: WebSocketServer;
   deliver: (recipientUserIds: readonly number[], payload: unknown) => void;
+  broadcast: (payload: unknown) => void;
 }
 
 type Client = WebSocket & {
@@ -32,6 +35,7 @@ type Client = WebSocket & {
   authenticated: boolean;
   isAlive: boolean;
   authTimer?: ReturnType<typeof setTimeout>;
+  accessTokenExpirationTimer?: ReturnType<typeof setTimeout>;
   messageQueue: Promise<void>;
   pendingFrames: number;
   maxBufferedAmountBytes: number;
@@ -82,11 +86,38 @@ function clearAuthenticationTimer(client: Client): void {
   client.authTimer = undefined;
 }
 
+function clearAccessTokenExpirationTimer(client: Client): void {
+  if (!client.accessTokenExpirationTimer) return;
+  clearTimeout(client.accessTokenExpirationTimer);
+  client.accessTokenExpirationTimer = undefined;
+}
+
+function scheduleAccessTokenExpiration(client: Client, expiresAt: Date): void {
+  clearAccessTokenExpirationTimer(client);
+
+  const expireWhenDue = (): void => {
+    const remainingMs = expiresAt.getTime() - Date.now();
+
+    if (remainingMs <= 0) {
+      closeWithError(client, 'auth_error', 'ACCESS_TOKEN_EXPIRED', 'Access token expired', 4001);
+      return;
+    }
+
+    client.accessTokenExpirationTimer = setTimeout(
+      expireWhenDue,
+      Math.min(remainingMs, maxTimerDelayMs)
+    );
+    client.accessTokenExpirationTimer.unref();
+  };
+
+  expireWhenDue();
+}
+
 async function authenticateClient(
   client: Client,
   frame: unknown,
   verifyAccessToken: WsHubOptions['verifyAccessToken']
-): Promise<number | null> {
+): Promise<WsAuthenticatedUser | null> {
   const result = authenticateFrameSchema.safeParse(frame);
 
   if (!result.success) {
@@ -113,7 +144,10 @@ async function authenticateClient(
   if (
     !authenticatedUser ||
     !Number.isSafeInteger(authenticatedUser.userId) ||
-    authenticatedUser.userId <= 0
+    authenticatedUser.userId <= 0 ||
+    !(authenticatedUser.accessTokenExpiresAt instanceof Date) ||
+    !Number.isFinite(authenticatedUser.accessTokenExpiresAt.getTime()) ||
+    authenticatedUser.accessTokenExpiresAt.getTime() <= Date.now()
   ) {
     closeWithError(client, 'auth_error', 'INVALID_ACCESS_TOKEN', 'Authentication failed', 1008);
     return null;
@@ -121,11 +155,7 @@ async function authenticateClient(
 
   if (client.readyState !== WebSocket.OPEN) return null;
 
-  client.userId = authenticatedUser.userId;
-  client.authenticated = true;
-  clearAuthenticationTimer(client);
-  sendJson(client, { type: 'authenticated' });
-  return authenticatedUser.userId;
+  return authenticatedUser;
 }
 
 async function handleFrame(
@@ -154,8 +184,15 @@ async function handleFrame(
     return;
   }
 
-  const userId = await authenticateClient(client, frame, verifyAccessToken);
-  if (userId) registerAuthenticatedClient(client, userId);
+  const authenticatedUser = await authenticateClient(client, frame, verifyAccessToken);
+  if (!authenticatedUser) return;
+
+  registerAuthenticatedClient(client, authenticatedUser.userId);
+  client.userId = authenticatedUser.userId;
+  client.authenticated = true;
+  clearAuthenticationTimer(client);
+  scheduleAccessTokenExpiration(client, authenticatedUser.accessTokenExpiresAt);
+  sendJson(client, { type: 'authenticated' });
 }
 
 export function attachWs(server: Server, options: WsHubOptions): WsHub {
@@ -176,6 +213,7 @@ export function attachWs(server: Server, options: WsHubOptions): WsHub {
 
   const cleanup = (client: Client): void => {
     clearAuthenticationTimer(client);
+    clearAccessTokenExpirationTimer(client);
     hubClients.delete(client);
 
     if (!client.userId) return;
@@ -280,5 +318,13 @@ export function attachWs(server: Server, options: WsHubOptions): WsHub {
     }
   };
 
-  return { webSocketServer, deliver };
+  const broadcast = (payload: unknown): void => {
+    const data = JSON.stringify(payload);
+
+    for (const client of hubClients) {
+      if (client.authenticated) sendSerialized(client, data);
+    }
+  };
+
+  return { webSocketServer, deliver, broadcast };
 }

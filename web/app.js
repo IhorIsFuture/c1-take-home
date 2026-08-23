@@ -89,7 +89,8 @@ const state = {
   creatingConversation: false,
   pendingConversation: null,
   pendingRealtimeMessages: new Map(),
-  conversationRefreshPromise: null
+  conversationRefreshPromise: null,
+  realtimeResyncPromise: null
 };
 
 let relaySocket = null;
@@ -194,6 +195,7 @@ function resetApplicationState() {
   state.pendingConversation = null;
   state.pendingRealtimeMessages.clear();
   state.conversationRefreshPromise = null;
+  state.realtimeResyncPromise = null;
   elements.app.classList.remove('is-chat-open');
   elements.search.value = '';
   elements.text.value = '';
@@ -214,6 +216,7 @@ async function enterApplication(user) {
     refreshAccessToken: restoreSession,
     onAuthenticationFailed: () => leaveApplication('Your session expired. Please sign in again.'),
     onMessage: receiveMessage,
+    onResyncRequired: resyncRealtimeState,
     onStatus: renderConnectionStatus
   });
   relaySocket.connect();
@@ -787,7 +790,7 @@ function receiveMessage(message) {
     createdAt: message.createdAt
   };
 
-  if (!activeConversationVisible) {
+  if (!activeConversationVisible && message.senderId !== state.user?.id) {
     conversation.unreadCount = (conversation.unreadCount ?? 0) + 1;
   }
 
@@ -828,7 +831,8 @@ async function refreshConversationsForRealtime() {
           (!mobileViewport.matches || elements.app.classList.contains('is-chat-open'));
 
         if (!activeConversationVisible) {
-          conversation.unreadCount = (conversation.unreadCount ?? 0) + messages.length;
+          const unreadMessages = messages.filter(message => message.senderId !== state.user?.id);
+          conversation.unreadCount = (conversation.unreadCount ?? 0) + unreadMessages.length;
         }
       }
 
@@ -849,6 +853,82 @@ async function refreshConversationsForRealtime() {
   })();
 
   return state.conversationRefreshPromise;
+}
+
+async function resyncRealtimeState() {
+  if (state.realtimeResyncPromise) return state.realtimeResyncPromise;
+
+  const userId = state.user?.id;
+  if (!userId) return;
+
+  const activeConversationId = state.activeConversationId;
+  const shouldReloadActiveConversation = !!activeConversationId && state.view === 'conversation';
+
+  state.realtimeResyncPromise = (async () => {
+    const conversations = await getConversations();
+    if (state.user?.id !== userId) return;
+
+    const previousById = new Map(
+      state.conversations.map(conversation => [conversation.id, conversation])
+    );
+
+    state.conversations = conversations.map(conversation => {
+      const previous = previousById.get(conversation.id);
+      const missedMessageCount = Math.max(
+        0,
+        conversation.messageCount - (previous?.messageCount ?? 0)
+      );
+      const lastMissedMessageIsOwn =
+        missedMessageCount === 1 && conversation.lastMessage?.senderId === userId;
+      const activeConversationVisible =
+        conversation.id === state.activeConversationId &&
+        state.view === 'conversation' &&
+        (!mobileViewport.matches || elements.app.classList.contains('is-chat-open'));
+
+      return {
+        ...conversation,
+        unreadCount: activeConversationVisible
+          ? 0
+          : (previous?.unreadCount ?? 0) + (lastMissedMessageIsOwn ? 0 : missedMessageCount)
+      };
+    });
+
+    renderConversations();
+    renderHeader();
+
+    if (
+      !shouldReloadActiveConversation ||
+      state.activeConversationId !== activeConversationId ||
+      state.view !== 'conversation'
+    ) {
+      return;
+    }
+
+    const messages = await getMessages(activeConversationId);
+    if (
+      state.user?.id !== userId ||
+      state.activeConversationId !== activeConversationId ||
+      state.view !== 'conversation'
+    ) {
+      return;
+    }
+
+    const mergedMessages = new Map(messages.map(message => [message.id, message]));
+    for (const message of state.messages) mergedMessages.set(message.id, message);
+
+    state.messages = [...mergedMessages.values()].sort((left, right) => left.id - right.id);
+    for (const message of state.messages) state.seenMessageIds.add(message.id);
+    renderMessages();
+    renderHeader();
+  })()
+    .catch(error => {
+      showToast(error.message ?? 'Realtime state could not be synchronized.', 'error');
+    })
+    .finally(() => {
+      state.realtimeResyncPromise = null;
+    });
+
+  return state.realtimeResyncPromise;
 }
 
 async function submitMessage(event) {
