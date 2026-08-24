@@ -11,4 +11,7 @@ Progress:
 10. body-hash-not-null migration and remove code
 11. Prepare the environment for integration and load-performance testing
 12. Create integration tests for the application
-13. 
+13. Create load-performance tests for the application.
+14. Create a multi-instance feature, apply redis client and pub/sub feature in Redis. Add Redis to test environments.
+15. Websocket load tests and optimization.
+16. 

@@ -1,8 +1,8 @@
 import type { ValidatedHandler } from '../middleware/validate-request';
 import { requireAuth } from '../middleware/authenticate';
 import type { RealtimePublisher } from '../realtime/index';
-import { createMessage, listMessages } from '../services/messages';
-import type { CreateMessageRequest, ListMessagesRequest } from '../validation/messages';
+import { createMessage } from '../services/messages';
+import type { CreateMessageRequest } from '../validation/messages';
 
 export function createMessageHandler(
   realtimePublisher: RealtimePublisher
@@ -17,11 +17,3 @@ export function createMessageHandler(
     response.status(result.created ? 201 : 200).json(result.message);
   };
 }
-
-export const listMessagesHandler: ValidatedHandler<ListMessagesRequest> = async (
-  { query: { conversationId } },
-  { request, response }
-) => {
-  const { userId } = requireAuth(request);
-  response.json(await listMessages(userId, conversationId));
-};

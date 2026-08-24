@@ -2,8 +2,17 @@ import {
   conversationRepository,
   type ConversationDto
 } from '../repositories/conversation-repository';
+import { isDeadlockError } from '../db/errors';
 import { HttpError } from '../errors/http-error';
+import { conversationReadStateRepository } from '../repositories/conversation-read-state-repository';
+import { messageMetadataRepository } from '../repositories/message-metadata-repository';
 import { userRepository } from '../repositories/user-repository';
+
+export interface ConversationReadStateDto {
+  conversationId: number;
+  lastReadMessageId: number | null;
+  unreadCount: number;
+}
 
 export async function listConversations(userId: number): Promise<ConversationDto[]> {
   return conversationRepository.listByUserId(userId);
@@ -53,5 +62,51 @@ export async function createConversation(
       participantIds: result.conversation.participantIds
     },
     created: result.created
+  };
+}
+
+export async function markConversationRead(
+  userId: number,
+  conversationId: number,
+  throughMessageId: number
+): Promise<ConversationReadStateDto> {
+  if (!(await conversationRepository.hasParticipant(conversationId, userId))) {
+    throw new HttpError(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
+  }
+
+  if (
+    !(await messageMetadataRepository.messageBelongsToConversation(
+      throughMessageId,
+      conversationId
+    ))
+  ) {
+    throw new HttpError(404, 'MESSAGE_NOT_FOUND', 'Message not found');
+  }
+
+  try {
+    await conversationReadStateRepository.advanceCursor({
+      conversationId,
+      userId,
+      throughMessageId
+    });
+  } catch (error) {
+    if (!isDeadlockError(error)) throw error;
+    await conversationReadStateRepository.advanceCursor({
+      conversationId,
+      userId,
+      throughMessageId
+    });
+  }
+
+  const readState = await conversationReadStateRepository.getReadState(conversationId, userId);
+
+  if (!readState) {
+    throw new HttpError(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
+  }
+
+  return {
+    conversationId,
+    lastReadMessageId: readState.lastReadMessageId,
+    unreadCount: readState.unreadCount
   };
 }

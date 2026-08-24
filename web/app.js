@@ -8,6 +8,7 @@ import {
   getMessages,
   loginAccount,
   logoutAccount,
+  markConversationRead,
   onSessionExpired,
   registerAccount,
   restoreSession,
@@ -77,6 +78,8 @@ const state = {
   view: 'welcome',
   loadingConversations: true,
   loadingMessages: false,
+  loadingEarlierMessages: false,
+  hasMoreMessages: false,
   sending: false,
   searchQuery: '',
   pendingMessage: null,
@@ -183,6 +186,8 @@ function resetApplicationState() {
   state.view = 'welcome';
   state.loadingConversations = true;
   state.loadingMessages = false;
+  state.loadingEarlierMessages = false;
+  state.hasMoreMessages = false;
   state.sending = false;
   state.searchQuery = '';
   state.pendingMessage = null;
@@ -437,10 +442,7 @@ function renderConversations() {
     const button = createElement('button', 'conversation-card');
     button.type = 'button';
     button.setAttribute('aria-current', String(conversation.id === state.activeConversationId));
-    button.setAttribute(
-      'aria-label',
-      `${conversation.title}, ${pluralize(conversation.messageCount, 'message')}`
-    );
+    button.setAttribute('aria-label', conversation.title);
 
     const avatar = createElement('span', 'avatar');
     renderAvatar(avatar, conversation.title);
@@ -450,9 +452,7 @@ function renderConversations() {
     const preview = createElement(
       'span',
       'conversation-preview',
-      conversation.messageCount
-        ? pluralize(conversation.messageCount, 'message')
-        : 'No messages yet'
+      conversation.lastMessage?.preview ?? 'No messages yet'
     );
     copy.append(title, preview);
 
@@ -462,12 +462,11 @@ function renderConversations() {
       'conversation-time',
       formatActivity(conversation.lastMessage?.createdAt)
     );
-    const count = createElement(
-      'span',
-      conversation.unreadCount ? 'unread-count' : 'message-count',
-      String(conversation.unreadCount || conversation.messageCount)
-    );
-    meta.append(time, count);
+    meta.appendChild(time);
+
+    if (conversation.unreadCount) {
+      meta.appendChild(createElement('span', 'unread-count', String(conversation.unreadCount)));
+    }
 
     button.append(avatar, copy, meta);
     button.addEventListener('click', () => openConversation(conversation.id, conversation.title));
@@ -545,7 +544,7 @@ function createMessageElement(message) {
   return row;
 }
 
-function renderMessages() {
+function renderMessages({ preserveScroll = false } = {}) {
   if (state.loadingMessages) {
     renderMessageLoading();
     return;
@@ -560,6 +559,10 @@ function renderMessages() {
     return;
   }
 
+  const container = elements.messages;
+  const previousTop = container.scrollTop;
+  const previousHeight = container.scrollHeight;
+  const wasNearBottom = previousHeight - previousTop - container.clientHeight < 120;
   const rail = createElement('div', 'message-rail');
   let currentDate = '';
 
@@ -572,9 +575,20 @@ function renderMessages() {
     rail.appendChild(createMessageElement(message));
   }
 
-  elements.messages.replaceChildren(rail);
+  container.replaceChildren(rail);
+
   requestAnimationFrame(() => {
-    elements.messages.scrollTop = elements.messages.scrollHeight;
+    if (preserveScroll) {
+      container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
+      return;
+    }
+
+    if (wasNearBottom) {
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+
+    container.scrollTop = previousTop;
   });
 }
 
@@ -600,9 +614,10 @@ function renderHeader() {
     conversation?.title ??
     state.activeConversationTitle ??
     `Conversation #${state.activeConversationId}`;
-  const messageCount = conversation?.messageCount ?? state.messages.length;
   elements.title.textContent = title;
-  elements.chatStatus.textContent = pluralize(messageCount, 'message');
+  elements.chatStatus.textContent = conversation?.lastMessage
+    ? `Last activity ${formatActivity(conversation.lastMessage.createdAt)}`
+    : 'No messages yet';
   renderAvatar(elements.chatAvatar, title);
 }
 
@@ -677,8 +692,14 @@ function showToast(message, type = 'success') {
 
 function mergeUnreadState(conversations) {
   return conversations.map(conversation => {
-    const previous = state.conversations.find(item => item.id === conversation.id);
-    return { ...conversation, unreadCount: previous?.unreadCount ?? 0 };
+    const activeConversationVisible =
+      conversation.id === state.activeConversationId &&
+      state.view === 'conversation' &&
+      (!mobileViewport.matches || elements.app.classList.contains('is-chat-open'));
+    return {
+      ...conversation,
+      unreadCount: activeConversationVisible ? 0 : (conversation.unreadCount ?? 0)
+    };
   });
 }
 
@@ -714,6 +735,11 @@ async function loadConversations({ openId } = {}) {
   }
 }
 
+function markConversationReadOnServer(conversationId, throughMessageId) {
+  if (!throughMessageId) return;
+  markConversationRead(conversationId, throughMessageId).catch(() => undefined);
+}
+
 async function openConversation(id, title) {
   state.messagesController?.abort();
   state.searchController?.abort();
@@ -723,6 +749,7 @@ async function openConversation(id, title) {
   state.view = 'conversation';
   state.loadingMessages = true;
   state.messages = [];
+  state.hasMoreMessages = false;
 
   const conversation = getActiveConversation();
   if (conversation) conversation.unreadCount = 0;
@@ -737,9 +764,10 @@ async function openConversation(id, title) {
   state.messagesController = controller;
 
   try {
-    const messages = await getMessages(id, controller.signal);
+    const messages = await getMessages(id, { limit: 30 }, controller.signal);
     if (controller !== state.messagesController) return;
 
+    state.hasMoreMessages = messages.length === 30;
     const liveMessages = state.messages.filter(message => message.conversationId === id);
     const merged = new Map(messages.map(message => [message.id, message]));
     for (const message of liveMessages) merged.set(message.id, message);
@@ -750,6 +778,8 @@ async function openConversation(id, title) {
     renderHeader();
     setComposerAvailability();
     renderMessages();
+    markConversationReadOnServer(id, state.messages[state.messages.length - 1]?.id);
+    requestAnimationFrame(maybeLoadEarlierMessages);
   } catch (error) {
     if (error.name === 'AbortError') return;
     state.loadingMessages = false;
@@ -761,6 +791,77 @@ async function openConversation(id, title) {
       action: () => openConversation(id, title)
     });
     setComposerAvailability();
+  }
+}
+
+function maybeLoadEarlierMessages() {
+  if (state.view !== 'conversation' || !state.hasMoreMessages || state.loadingEarlierMessages) {
+    return;
+  }
+
+  const nearTop = elements.messages.scrollTop < 200;
+  const noScrollbar = elements.messages.scrollHeight <= elements.messages.clientHeight;
+  if (nearTop || noScrollbar) void loadEarlierMessages();
+}
+
+function prependMessagesToRail(olderMessages) {
+  const container = elements.messages;
+  const rail = container.querySelector('.message-rail');
+
+  if (!rail) {
+    renderMessages({ preserveScroll: true });
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  let currentDate = '';
+
+  for (const message of olderMessages) {
+    const messageDate = formatMessageDate(message.createdAt);
+    if (messageDate && messageDate !== currentDate) {
+      currentDate = messageDate;
+      fragment.appendChild(createElement('div', 'date-divider', messageDate));
+    }
+    fragment.appendChild(createMessageElement(message));
+  }
+
+  const leadingDivider = rail.firstElementChild;
+  if (
+    leadingDivider?.classList.contains('date-divider') &&
+    leadingDivider.textContent === currentDate
+  ) {
+    leadingDivider.remove();
+  }
+
+  const previousHeight = container.scrollHeight;
+  const previousTop = container.scrollTop;
+  rail.prepend(fragment);
+  container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
+}
+
+async function loadEarlierMessages() {
+  const conversationId = state.activeConversationId;
+  const oldestMessageId = state.messages[0]?.id;
+  if (!conversationId || !oldestMessageId || state.loadingEarlierMessages) return;
+
+  state.loadingEarlierMessages = true;
+
+  try {
+    const messages = await getMessages(conversationId, { beforeId: oldestMessageId, limit: 30 });
+    if (state.activeConversationId !== conversationId) return;
+
+    state.hasMoreMessages = messages.length === 30;
+    const knownIds = new Set(state.messages.map(message => message.id));
+    const olderMessages = messages.filter(message => !knownIds.has(message.id));
+    if (!olderMessages.length) return;
+
+    state.messages = [...olderMessages, ...state.messages];
+    for (const message of olderMessages) state.seenMessageIds.add(message.id);
+    prependMessagesToRail(olderMessages);
+  } catch (error) {
+    showToast(error.message ?? 'Earlier messages could not be loaded.', 'error');
+  } finally {
+    state.loadingEarlierMessages = false;
   }
 }
 
@@ -783,15 +884,20 @@ function receiveMessage(message) {
     state.view === 'conversation' &&
     (!mobileViewport.matches || elements.app.classList.contains('is-chat-open'));
 
-  conversation.messageCount += 1;
   conversation.lastMessage = {
     id: message.id,
     senderId: message.senderId,
+    senderName: message.senderName,
+    preview: message.body.slice(0, 300),
     createdAt: message.createdAt
   };
 
   if (!activeConversationVisible && message.senderId !== state.user?.id) {
     conversation.unreadCount = (conversation.unreadCount ?? 0) + 1;
+  }
+
+  if (activeConversationVisible && message.senderId !== state.user?.id) {
+    markConversationReadOnServer(message.conversationId, message.id);
   }
 
   if (message.conversationId === state.activeConversationId && state.view === 'conversation') {
@@ -820,22 +926,6 @@ async function refreshConversationsForRealtime() {
       const conversations = await getConversations();
       if (state.user?.id !== userId) return;
       state.conversations = mergeUnreadState(conversations);
-
-      for (const [conversationId, messages] of pendingMessagesByConversation) {
-        const conversation = state.conversations.find(item => item.id === conversationId);
-        if (!conversation) continue;
-
-        const activeConversationVisible =
-          conversationId === state.activeConversationId &&
-          state.view === 'conversation' &&
-          (!mobileViewport.matches || elements.app.classList.contains('is-chat-open'));
-
-        if (!activeConversationVisible) {
-          const unreadMessages = messages.filter(message => message.senderId !== state.user?.id);
-          conversation.unreadCount = (conversation.unreadCount ?? 0) + unreadMessages.length;
-        }
-      }
-
       renderConversations();
       refreshSucceeded = true;
     } catch (error) {
@@ -868,31 +958,7 @@ async function resyncRealtimeState() {
     const conversations = await getConversations();
     if (state.user?.id !== userId) return;
 
-    const previousById = new Map(
-      state.conversations.map(conversation => [conversation.id, conversation])
-    );
-
-    state.conversations = conversations.map(conversation => {
-      const previous = previousById.get(conversation.id);
-      const missedMessageCount = Math.max(
-        0,
-        conversation.messageCount - (previous?.messageCount ?? 0)
-      );
-      const lastMissedMessageIsOwn =
-        missedMessageCount === 1 && conversation.lastMessage?.senderId === userId;
-      const activeConversationVisible =
-        conversation.id === state.activeConversationId &&
-        state.view === 'conversation' &&
-        (!mobileViewport.matches || elements.app.classList.contains('is-chat-open'));
-
-      return {
-        ...conversation,
-        unreadCount: activeConversationVisible
-          ? 0
-          : (previous?.unreadCount ?? 0) + (lastMissedMessageIsOwn ? 0 : missedMessageCount)
-      };
-    });
-
+    state.conversations = mergeUnreadState(conversations);
     renderConversations();
     renderHeader();
 
@@ -904,7 +970,7 @@ async function resyncRealtimeState() {
       return;
     }
 
-    const messages = await getMessages(activeConversationId);
+    const messages = await getMessages(activeConversationId, { limit: 30 });
     if (
       state.user?.id !== userId ||
       state.activeConversationId !== activeConversationId ||
@@ -920,6 +986,10 @@ async function resyncRealtimeState() {
     for (const message of state.messages) state.seenMessageIds.add(message.id);
     renderMessages();
     renderHeader();
+    markConversationReadOnServer(
+      activeConversationId,
+      state.messages[state.messages.length - 1]?.id
+    );
   })()
     .catch(error => {
       showToast(error.message ?? 'Realtime state could not be synchronized.', 'error');
@@ -1158,6 +1228,7 @@ function clearSearch() {
   else renderWelcome();
 }
 
+elements.messages.addEventListener('scroll', maybeLoadEarlierMessages);
 elements.composer.addEventListener('submit', submitMessage);
 elements.text.addEventListener('input', () => {
   if (state.pendingMessage?.body !== elements.text.value.trim()) state.pendingMessage = null;

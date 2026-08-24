@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { config } from '../config';
+import { legacyConfig } from './config';
 
 const retryDelayMs = 1500;
 
@@ -10,7 +10,7 @@ export async function connectMongo(retries = 20): Promise<void> {
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      await mongoose.connect(config.mongoUrl, {
+      await mongoose.connect(legacyConfig.mongoUrl, {
         serverSelectionTimeoutMS: retryDelayMs
       });
       return;

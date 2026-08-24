@@ -8,6 +8,7 @@ import {
   Sequelize,
   literal
 } from 'sequelize';
+import type { MessageBody } from './message-body';
 import type { User } from './user';
 
 export class Message extends Model<InferAttributes<Message>, InferCreationAttributes<Message>> {
@@ -18,13 +19,14 @@ export class Message extends Model<InferAttributes<Message>, InferCreationAttrib
   declare bodyHash: string;
   declare createdAt: CreationOptional<Date>;
   declare sender?: NonAttribute<User>;
+  declare bodyRow?: NonAttribute<MessageBody>;
 }
 
 export function initializeMessageModel(sequelize: Sequelize): typeof Message {
   Message.init(
     {
       id: {
-        type: DataTypes.INTEGER.UNSIGNED,
+        type: DataTypes.BIGINT.UNSIGNED,
         autoIncrement: true,
         primaryKey: true
       },

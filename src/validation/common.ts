@@ -29,3 +29,23 @@ export function requiredStringSchema(maxLength: number) {
     .min(1, 'Must not be empty')
     .max(maxLength, `Must contain at most ${maxLength} characters`);
 }
+
+export const positiveBigIntegerSchema = z
+  .union(
+    [
+      z.number({ error: positiveIntegerMessage }),
+      z
+        .string({ error: positiveIntegerMessage })
+        .trim()
+        .regex(/^[1-9]\d*$/, positiveIntegerMessage)
+    ],
+    { error: positiveIntegerMessage }
+  )
+  .transform(value => Number(value))
+  .pipe(
+    z
+      .number()
+      .int(positiveIntegerMessage)
+      .positive(positiveIntegerMessage)
+      .max(Number.MAX_SAFE_INTEGER, positiveIntegerMessage)
+  );

@@ -1,19 +1,21 @@
-import { Op, UniqueConstraintError } from 'sequelize';
+import { QueryTypes, UniqueConstraintError } from 'sequelize';
 import { sequelize } from '../db/mysql';
 import { HttpError } from '../errors/http-error';
-import { Conversation, ConversationParticipant, Message } from '../models/sql';
+import { Conversation, ConversationParticipant, ConversationSummary } from '../models/sql';
 
-export interface LastMessageDto {
+export interface ConversationLastMessageDto {
   id: number;
   senderId: number;
+  senderName: string;
+  preview: string | null;
   createdAt: Date;
 }
 
 export interface ConversationDto {
   id: number;
   title: string;
-  lastMessage: LastMessageDto | null;
-  messageCount: number;
+  lastMessage: ConversationLastMessageDto | null;
+  unreadCount: number;
 }
 
 export interface NewConversation {
@@ -36,7 +38,21 @@ export interface ConversationRepository {
   listByUserId(userId: number): Promise<ConversationDto[]>;
   createOrFind(input: NewConversation): Promise<ConversationWriteResult>;
   listParticipantIds(conversationId: number): Promise<number[]>;
+  listParticipantIdsByConversationIds(
+    conversationIds: readonly number[]
+  ): Promise<Map<number, number[]>>;
   hasParticipant(conversationId: number, userId: number): Promise<boolean>;
+}
+
+interface ConversationListRow {
+  id: number;
+  title: string;
+  unreadCount: number;
+  lastMessageId: number | null;
+  lastMessageAt: Date | null;
+  lastSenderId: number | null;
+  lastSenderName: string | null;
+  lastMessagePreview: string | null;
 }
 
 function idempotencyConflict(): HttpError {
@@ -91,68 +107,38 @@ async function findExistingConversation(
 
 class SequelizeConversationRepository implements ConversationRepository {
   async listByUserId(userId: number): Promise<ConversationDto[]> {
-    const conversations = await Conversation.findAll({
-      attributes: ['id', 'title'],
-      include: [
-        {
-          model: ConversationParticipant,
-          attributes: [],
-          where: { userId },
-          required: true
-        }
-      ],
-      order: [['id', 'ASC']],
-      raw: true
-    });
+    const rows = await sequelize.query<ConversationListRow>(
+      `SELECT c.id, c.title, p.unread_count AS unreadCount,
+        s.last_message_id AS lastMessageId, s.last_message_at AS lastMessageAt,
+        s.last_sender_id AS lastSenderId, u.name AS lastSenderName,
+        s.last_message_preview AS lastMessagePreview
+      FROM conversation_participants p
+      JOIN conversations c ON c.id = p.conversation_id
+      LEFT JOIN conversation_summaries s ON s.conversation_id = c.id
+      LEFT JOIN users u ON u.id = s.last_sender_id
+      WHERE p.user_id = :userId
+      ORDER BY COALESCE(s.last_message_at, c.created_at) DESC, c.id DESC`,
+      { replacements: { userId }, type: QueryTypes.SELECT }
+    );
 
-    if (!conversations.length) return [];
-
-    const conversationIds = conversations.map(conversation => conversation.id);
-    const messages = await Message.findAll({
-      attributes: ['id', 'conversationId', 'senderId', 'createdAt'],
-      where: { conversationId: { [Op.in]: conversationIds } },
-      order: [
-        ['conversationId', 'ASC'],
-        ['id', 'DESC']
-      ],
-      raw: true
-    });
-
-    const summaryByConversationId = new Map<
-      number,
-      { lastMessage: LastMessageDto; messageCount: number }
-    >();
-
-    for (const message of messages) {
-      const conversationId = message.conversationId;
-      const current = summaryByConversationId.get(conversationId);
-
-      if (current) {
-        current.messageCount += 1;
-        continue;
-      }
-
-      summaryByConversationId.set(conversationId, {
-        lastMessage: {
-          id: message.id,
-          senderId: message.senderId,
-          createdAt: message.createdAt
-        },
-        messageCount: 1
-      });
-    }
-
-    return conversations.map(conversation => {
-      const id = conversation.id;
-      const summary = summaryByConversationId.get(id);
-
-      return {
-        id,
-        title: conversation.title,
-        lastMessage: summary?.lastMessage ?? null,
-        messageCount: summary?.messageCount ?? 0
-      };
-    });
+    return rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      unreadCount: row.unreadCount,
+      lastMessage:
+        row.lastMessageId === null ||
+        row.lastMessageAt === null ||
+        row.lastSenderId === null ||
+        row.lastSenderName === null
+          ? null
+          : {
+              id: row.lastMessageId,
+              senderId: row.lastSenderId,
+              senderName: row.lastSenderName,
+              preview: row.lastMessagePreview,
+              createdAt: row.lastMessageAt
+            }
+    }));
   }
 
   async createOrFind(input: NewConversation): Promise<ConversationWriteResult> {
@@ -177,6 +163,8 @@ class SequelizeConversationRepository implements ConversationRepository {
           })),
           { transaction }
         );
+
+        await ConversationSummary.create({ conversationId: conversation.id }, { transaction });
 
         return {
           conversation: {
@@ -212,6 +200,30 @@ class SequelizeConversationRepository implements ConversationRepository {
     });
 
     return participants.map(participant => participant.userId);
+  }
+
+  async listParticipantIdsByConversationIds(
+    conversationIds: readonly number[]
+  ): Promise<Map<number, number[]>> {
+    const participantsByConversationId = new Map<number, number[]>();
+
+    if (!conversationIds.length) return participantsByConversationId;
+
+    const rows = await sequelize.query<{ conversationId: number; userId: number }>(
+      `SELECT conversation_id AS conversationId, user_id AS userId
+      FROM conversation_participants
+      WHERE conversation_id IN (:conversationIds)
+      ORDER BY conversation_id, user_id`,
+      { replacements: { conversationIds: [...conversationIds] }, type: QueryTypes.SELECT }
+    );
+
+    for (const row of rows) {
+      const participantIds = participantsByConversationId.get(row.conversationId) ?? [];
+      participantIds.push(row.userId);
+      participantsByConversationId.set(row.conversationId, participantIds);
+    }
+
+    return participantsByConversationId;
   }
 }
 
