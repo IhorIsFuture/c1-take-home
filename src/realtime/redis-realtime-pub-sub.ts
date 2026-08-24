@@ -45,11 +45,27 @@ const typingEventSchema = z
   })
   .strict();
 
+const conversationCreatedEventSchema = z
+  .object({
+    type: z.literal('conversation.created'),
+    conversation: z
+      .object({
+        id: z.number().int().positive(),
+        title: z.string().min(1)
+      })
+      .strict()
+  })
+  .strict();
+
 const realtimeEnvelopeSchema = z
   .object({
     version: z.literal(1),
     recipientUserIds: z.array(z.number().int().positive()).min(1),
-    event: z.discriminatedUnion('type', [messageCreatedEventSchema, typingEventSchema])
+    event: z.discriminatedUnion('type', [
+      messageCreatedEventSchema,
+      typingEventSchema,
+      conversationCreatedEventSchema
+    ])
   })
   .strict();
 
@@ -75,7 +91,7 @@ function serializeDelivery(delivery: RealtimeDelivery): string {
 function parseDelivery(message: string): RealtimeDelivery {
   const envelope = realtimeEnvelopeSchema.parse(JSON.parse(message));
 
-  if (envelope.event.type === 'typing') {
+  if (envelope.event.type !== 'message.created') {
     return { recipientUserIds: envelope.recipientUserIds, event: envelope.event };
   }
 
@@ -141,7 +157,7 @@ export class RedisRealtimePubSub implements RealtimePublisher {
 
     const delivery = serializeDelivery({ event, recipientUserIds: uniqueRecipientUserIds });
 
-    if (event.type === 'typing') {
+    if (event.type !== 'message.created') {
       await this.publisher.publish(this.channel, delivery);
       return;
     }

@@ -23,7 +23,17 @@ export interface TypingEvent {
   typing: TypingEventPayload;
 }
 
-export type RealtimeEvent = MessageCreatedEvent | TypingEvent;
+export interface ConversationCreatedPayload {
+  id: number;
+  title: string;
+}
+
+export interface ConversationCreatedEvent {
+  type: 'conversation.created';
+  conversation: ConversationCreatedPayload;
+}
+
+export type RealtimeEvent = MessageCreatedEvent | TypingEvent | ConversationCreatedEvent;
 
 export interface RealtimeDelivery {
   recipientUserIds: readonly number[];

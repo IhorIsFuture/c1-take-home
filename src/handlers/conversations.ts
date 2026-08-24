@@ -6,6 +6,7 @@ import {
   markConversationRead
 } from '../services/conversations';
 import { listConversationMessages } from '../services/messages';
+import type { RealtimePublisher } from '../realtime/index';
 import type {
   CreateConversationRequest,
   ListConversationMessagesRequest,
@@ -21,14 +22,21 @@ export const listConversationsHandler: ValidatedHandler<ListConversationsRequest
   response.json(await listConversations(userId));
 };
 
-export const createConversationHandler: ValidatedHandler<CreateConversationRequest> = async (
-  { body: { title, participantIds, clientId } },
-  { request, response }
-) => {
-  const { userId } = requireAuth(request);
-  const result = await createConversation(userId, title, participantIds, clientId);
-  response.status(result.created ? 201 : 200).json(result.conversation);
-};
+export function createConversationHandler(
+  realtimePublisher: RealtimePublisher
+): ValidatedHandler<CreateConversationRequest> {
+  return async ({ body: { title, participantIds, clientId } }, { request, response }) => {
+    const { userId } = requireAuth(request);
+    const result = await createConversation(
+      userId,
+      title,
+      participantIds,
+      clientId,
+      realtimePublisher
+    );
+    response.status(result.created ? 201 : 200).json(result.conversation);
+  };
+}
 
 export const listConversationMessagesHandler: ValidatedHandler<
   ListConversationMessagesRequest

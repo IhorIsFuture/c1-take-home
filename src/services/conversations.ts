@@ -7,6 +7,7 @@ import { HttpError } from '../errors/http-error';
 import { conversationReadStateRepository } from '../repositories/conversation-read-state-repository';
 import { messageMetadataRepository } from '../repositories/message-metadata-repository';
 import { userRepository } from '../repositories/user-repository';
+import type { RealtimePublisher } from '../realtime/index';
 
 export interface ConversationReadStateDto {
   conversationId: number;
@@ -22,7 +23,8 @@ export async function createConversation(
   userId: number,
   title: string,
   participantIds: number[],
-  clientId: string
+  clientId: string,
+  realtimePublisher: RealtimePublisher
 ) {
   const otherParticipantIds = [...new Set(participantIds)].filter(
     participantId => participantId !== userId
@@ -54,6 +56,27 @@ export async function createConversation(
     createdByUserId: userId,
     clientId
   });
+
+  if (result.created) {
+    const recipientUserIds = allParticipantIds.filter(participantId => participantId !== userId);
+
+    if (recipientUserIds.length) {
+      try {
+        await realtimePublisher.publish(
+          {
+            type: 'conversation.created',
+            conversation: { id: result.conversation.id, title: result.conversation.title }
+          },
+          recipientUserIds
+        );
+      } catch (error) {
+        console.error(
+          `Failed to publish conversation.created for conversation ${result.conversation.id}`,
+          error
+        );
+      }
+    }
+  }
 
   return {
     conversation: {

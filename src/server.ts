@@ -203,6 +203,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
         return;
       }
 
+      if (event.type === 'conversation.created') {
+        deliver(recipientUserIds, { type: 'conversation_created', ...event.conversation });
+        return;
+      }
+
       deliver(recipientUserIds, { type: 'message', ...event.message });
     });
     connections.redis = true;
