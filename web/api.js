@@ -155,9 +155,10 @@ export function createConversation(title, participantIds, clientId) {
   });
 }
 
-export function getMessages(conversationId, { beforeId, limit = 30 } = {}, signal) {
+export function getMessages(conversationId, { beforeId, afterId, limit = 30 } = {}, signal) {
   const search = new URLSearchParams({ limit: String(limit) });
   if (beforeId) search.set('beforeId', String(beforeId));
+  if (afterId) search.set('afterId', String(afterId));
   return request(`/api/conversations/${encodeURIComponent(conversationId)}/messages?${search}`, {
     signal
   });

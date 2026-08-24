@@ -26,3 +26,4 @@ Progress:
 24. Message search: MySQL FULLTEXT with participant ACL and prefix matching
 25. Create a typing indicator.
 26. Realtime fixes: conversation.created event, search-view message loss, bfcache socket
+27. Search UX: jump-to-message, bidirectional paging, numeric narrowing, live search

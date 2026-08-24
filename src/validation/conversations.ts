@@ -23,10 +23,16 @@ export const listConversationMessagesRequestSchema = z.object({
   params: z.object({
     conversationId: positiveIntegerSchema
   }),
-  query: z.object({
-    beforeId: positiveBigIntegerSchema.optional(),
-    limit: z.coerce.number().int().min(1).max(100).default(30)
-  })
+  query: z
+    .object({
+      beforeId: positiveBigIntegerSchema.optional(),
+      afterId: positiveBigIntegerSchema.optional(),
+      limit: z.coerce.number().int().min(1).max(100).default(30)
+    })
+    .refine(query => query.beforeId === undefined || query.afterId === undefined, {
+      path: ['beforeId'],
+      message: 'Cannot combine beforeId and afterId'
+    })
 });
 
 export type ListConversationMessagesRequest = z.output<

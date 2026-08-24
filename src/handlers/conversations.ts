@@ -40,9 +40,14 @@ export function createConversationHandler(
 
 export const listConversationMessagesHandler: ValidatedHandler<
   ListConversationMessagesRequest
-> = async ({ params: { conversationId }, query: { beforeId, limit } }, { request, response }) => {
+> = async (
+  { params: { conversationId }, query: { beforeId, afterId, limit } },
+  { request, response }
+) => {
   const { userId } = requireAuth(request);
-  response.json(await listConversationMessages(userId, conversationId, beforeId, limit));
+  response.json(
+    await listConversationMessages(userId, conversationId, { beforeId, afterId }, limit)
+  );
 };
 
 export const markConversationReadHandler: ValidatedHandler<MarkConversationReadRequest> = async (
