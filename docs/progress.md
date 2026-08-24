@@ -23,3 +23,4 @@ Progress:
 21. Remove MongoDB completely: drop Mongoose, legacy migration tooling and mongo containers from all environments.
 22. Re-run load tests after the migration and compare against pre-refactor baselines: sidebar ~4x faster, message create ~30% faster, no realtime regressions.
 23. Rate limiting for message sending: Redis sliding window, 429 with Retry-After
+24. Message search: MySQL FULLTEXT with participant ACL and prefix matching
