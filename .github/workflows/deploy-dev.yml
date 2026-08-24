@@ -1,0 +1,235 @@
+name: CI and deploy demo
+
+on:
+  push:
+    branches:
+      - dev-deploy
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c1-take-home-demo-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify application
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.2
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run integration tests
+        run: npm test
+
+  deploy:
+    name: Deploy to demo server
+    needs:
+      - verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      SSH_HOST: ${{ vars.SSH_HOST }}
+      SSH_USER: ${{ vars.SSH_USER }}
+      SSH_PORT: ${{ vars.SSH_PORT }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          : "${SSH_HOST:?Missing repository variable SSH_HOST}"
+          : "${SSH_USER:?Missing repository variable SSH_USER}"
+          : "${SSH_PORT:?Missing repository variable SSH_PORT}"
+          : "${DEPLOY_PATH:?Missing repository variable DEPLOY_PATH}"
+
+          test -f docker-compose.dev.yml
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS_VALUE: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+
+          : "${SSH_PRIVATE_KEY:?Missing repository secret SSH_KEY}"
+          : "${SSH_KNOWN_HOSTS_VALUE:?Missing repository secret SSH_KNOWN_HOSTS}"
+
+          install -d -m 700 "$HOME/.ssh"
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" \
+            | tr -d '\r' \
+            > "$HOME/.ssh/deploy_key"
+
+          printf '%s\n' "$SSH_KNOWN_HOSTS_VALUE" \
+            | tr -d '\r' \
+            > "$HOME/.ssh/known_hosts"
+
+          chmod 600 \
+            "$HOME/.ssh/deploy_key" \
+            "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y \
+            -f "$HOME/.ssh/deploy_key" \
+            > /dev/null
+
+          cat > "$HOME/.ssh/config" <<EOF
+          Host c1-demo
+            HostName $SSH_HOST
+            User $SSH_USER
+            Port $SSH_PORT
+            IdentityFile $HOME/.ssh/deploy_key
+            IdentitiesOnly yes
+            BatchMode yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $HOME/.ssh/known_hosts
+            ConnectTimeout 10
+          EOF
+
+          chmod 600 "$HOME/.ssh/config"
+
+          ssh c1-demo \
+            'printf "SSH deployment connection OK: user=%s\n" "$(whoami)"'
+
+      - name: Install rsync on runner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+      - name: Verify deployment directory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          ssh c1-demo bash -s -- "$DEPLOY_PATH" <<'REMOTE'
+          set -Eeuo pipefail
+
+          deploy_path="$1"
+
+          test -d "$deploy_path"
+          test -w "$deploy_path"
+          test -f "$deploy_path/.env"
+          command -v docker > /dev/null
+          command -v rsync > /dev/null
+
+          printf 'Deployment directory ready: %s\n' "$deploy_path"
+          REMOTE
+
+      - name: Synchronize application files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          rsync \
+            --archive \
+            --compress \
+            --delete-delay \
+            --exclude='.env' \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.idea/' \
+            --exclude='.DS_Store' \
+            --exclude='node_modules/' \
+            --exclude='coverage/' \
+            --exclude='.deployed-sha' \
+            ./ \
+            "c1-demo:${DEPLOY_PATH}/"
+
+      - name: Build and start application
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          ssh c1-demo \
+            bash -s -- "$DEPLOY_PATH" "$GITHUB_SHA" <<'REMOTE'
+          set -Eeuo pipefail
+
+          deploy_path="$1"
+          commit_sha="$2"
+
+          cd "$deploy_path"
+
+          test -s .env
+          test -f docker-compose.dev.yml
+
+          compose=(
+            docker compose
+            -f docker-compose.dev.yml
+          )
+
+          "${compose[@]}" config > /dev/null
+
+          if "${compose[@]}" up \
+            --detach \
+            --build \
+            --remove-orphans \
+            --wait \
+            --wait-timeout 300
+          then
+            printf 'Docker Compose started successfully\n'
+          else
+            status=$?
+
+            printf '\nDeployment failed. Container status:\n' >&2
+            "${compose[@]}" ps --all || true
+
+            printf '\nRecent container logs:\n' >&2
+            "${compose[@]}" logs \
+              --no-color \
+              --tail=200 || true
+
+            exit "$status"
+          fi
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 10 \
+            --retry-delay 2 \
+            --retry-connrefused \
+            http://127.0.0.1:3000/health/ready \
+            > /dev/null
+
+          printf '%s\n' "$commit_sha" > .deployed-sha
+
+          printf '\nRunning services:\n'
+          "${compose[@]}" ps
+
+          printf '\nDeployment completed successfully\n'
+          printf 'commit=%s\n' "$commit_sha"
+          printf 'url=http://127.0.0.1:3000\n'
+          REMOTE
