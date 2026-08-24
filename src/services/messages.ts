@@ -2,7 +2,6 @@ import { Transaction, UniqueConstraintError } from 'sequelize';
 import { isDeadlockError } from '../db/errors';
 import { sequelize } from '../db/mysql';
 import { HttpError } from '../errors/http-error';
-import type { LegacyBodyReader } from '../legacy/legacy-body-reader';
 import { conversationReadStateRepository } from '../repositories/conversation-read-state-repository';
 import { conversationRepository } from '../repositories/conversation-repository';
 import { conversationSummaryRepository } from '../repositories/conversation-summary-repository';
@@ -31,12 +30,6 @@ export interface MessageDto {
   createdAt: Date;
 }
 
-let legacyBodyReader: LegacyBodyReader | null = null;
-
-export function setLegacyBodyReader(reader: LegacyBodyReader | null): void {
-  legacyBodyReader = reader;
-}
-
 export function messageCreatedEventId(messageId: number): string {
   return `message.created:${messageId}`;
 }
@@ -55,47 +48,21 @@ function idempotencyConflict(): HttpError {
   );
 }
 
-async function fillMissingBodies(records: readonly MessageRecord[]): Promise<Map<number, string>> {
+function reportMissingBodies(records: readonly MessageRecord[]): void {
   const missingIds = records.filter(record => record.body === null).map(record => record.id);
-  if (!missingIds.length) return new Map();
 
-  if (!legacyBodyReader) {
+  if (missingIds.length) {
     console.error(`Message bodies are missing in MySQL for ids: ${missingIds.join(', ')}`);
-    return new Map();
   }
-
-  const bodies = await legacyBodyReader.findByIds(missingIds);
-  const verified = new Map<number, string>();
-
-  for (const record of records) {
-    if (record.body !== null) continue;
-    const body = bodies.get(record.id);
-
-    if (body === undefined) {
-      console.error(`Legacy body for message ${record.id} was not found`);
-      continue;
-    }
-
-    if (hashMessageBody(body) !== record.bodyHash) {
-      console.error(`Legacy body for message ${record.id} does not match its hash`);
-      continue;
-    }
-
-    verified.set(record.id, body);
-  }
-
-  return verified;
 }
 
-async function toMessageDto(record: MessageRecord): Promise<MessageDto> {
-  const legacyBodies = await fillMissingBodies([record]);
-
+function toMessageDto(record: MessageRecord): MessageDto {
   return {
     id: record.id,
     conversationId: record.conversationId,
     senderId: record.senderId,
     senderName: record.senderName,
-    body: record.body ?? legacyBodies.get(record.id) ?? '',
+    body: record.body ?? '',
     createdAt: record.createdAt
   };
 }
@@ -130,7 +97,8 @@ export async function createMessage(
 
     if (existing) {
       if (existing.bodyHash !== bodyHash) throw idempotencyConflict();
-      return { message: await toMessageDto(existing), created: false };
+      reportMissingBodies([existing]);
+      return { message: toMessageDto(existing), created: false };
     }
 
     let created: { id: number; createdAt: Date };
@@ -215,16 +183,8 @@ export async function listConversationMessages(
   await requireConversationAccess(conversationId, userId);
 
   const records = await messageMetadataRepository.findPage(conversationId, beforeId, limit);
-  const legacyBodies = await fillMissingBodies(records);
 
-  return records
-    .map(record => ({
-      id: record.id,
-      conversationId: record.conversationId,
-      senderId: record.senderId,
-      senderName: record.senderName,
-      body: record.body ?? legacyBodies.get(record.id) ?? '',
-      createdAt: record.createdAt
-    }))
-    .reverse();
+  reportMissingBodies(records);
+
+  return records.map(toMessageDto).reverse();
 }

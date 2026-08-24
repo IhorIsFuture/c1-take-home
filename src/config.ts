@@ -1,47 +1,35 @@
 import { z } from 'zod';
 
-const environmentSchema = z
-  .object({
-    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    TEST_ENV_GUARD: z.literal('relay-test').optional(),
-    PORT: z.coerce.number().int().positive().max(65535).default(3000),
-    MYSQL_URL: z.string().min(1).default('mysql://root:root@mysql:3306/relay?charset=utf8mb4'),
-    MONGO_URL: z.string().min(1).optional(),
-    REDIS_URL: z.string().min(1).default('redis://redis:6379'),
-    REDIS_NAMESPACE: z
-      .string()
-      .trim()
-      .min(1)
-      .regex(/^[a-zA-Z0-9:_-]+$/)
-      .default('relay'),
-    MESSAGE_BODY_COMPAT: z.enum(['transition', 'sql-only']).default('sql-only'),
-    BCRYPT_COST: z.coerce.number().int().min(10).max(16).default(12),
-    JWT_ACCESS_SECRET: z.string().min(32).optional(),
-    JWT_ISSUER: z.string().min(1).default('relay-api'),
-    JWT_AUDIENCE: z.string().min(1).default('relay-web'),
-    JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
-    REFRESH_TOKEN_TTL_SECONDS: z.coerce
-      .number()
-      .int()
-      .positive()
-      .default(60 * 60 * 24 * 30),
-    OUTBOX_RELAY_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
-    OUTBOX_RELAY_POLL_INTERVAL_MS: z.coerce.number().int().min(50).default(1000),
-    OUTBOX_RELAY_BACKOFF_BASE_SECONDS: z.coerce.number().int().min(1).default(2),
-    OUTBOX_RELAY_BACKOFF_CAP_SECONDS: z.coerce.number().int().min(1).default(300),
-    OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(10),
-    OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(1).default(72),
-    OUTBOX_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(1000).default(3600000)
-  })
-  .superRefine((value, context) => {
-    if (value.MESSAGE_BODY_COMPAT === 'transition' && !value.MONGO_URL) {
-      context.addIssue({
-        code: 'custom',
-        path: ['MONGO_URL'],
-        message: 'MONGO_URL is required when MESSAGE_BODY_COMPAT is transition'
-      });
-    }
-  });
+const environmentSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  TEST_ENV_GUARD: z.literal('relay-test').optional(),
+  PORT: z.coerce.number().int().positive().max(65535).default(3000),
+  MYSQL_URL: z.string().min(1).default('mysql://root:root@mysql:3306/relay?charset=utf8mb4'),
+  REDIS_URL: z.string().min(1).default('redis://redis:6379'),
+  REDIS_NAMESPACE: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(/^[a-zA-Z0-9:_-]+$/)
+    .default('relay'),
+  BCRYPT_COST: z.coerce.number().int().min(10).max(16).default(12),
+  JWT_ACCESS_SECRET: z.string().min(32).optional(),
+  JWT_ISSUER: z.string().min(1).default('relay-api'),
+  JWT_AUDIENCE: z.string().min(1).default('relay-web'),
+  JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  REFRESH_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 24 * 30),
+  OUTBOX_RELAY_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
+  OUTBOX_RELAY_POLL_INTERVAL_MS: z.coerce.number().int().min(50).default(1000),
+  OUTBOX_RELAY_BACKOFF_BASE_SECONDS: z.coerce.number().int().min(1).default(2),
+  OUTBOX_RELAY_BACKOFF_CAP_SECONDS: z.coerce.number().int().min(1).default(300),
+  OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(10),
+  OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(1).default(72),
+  OUTBOX_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(1000).default(3600000)
+});
 
 const environment = environmentSchema.parse(process.env);
 const exampleAccessTokenSecret = 'replace-with-at-least-32-random-characters';
@@ -71,23 +59,6 @@ function isTestMysqlUrl(connectionUrl: string): boolean {
   );
 }
 
-export function isTestMongoUrl(connectionUrl: string): boolean {
-  const url = parseConnectionUrl(connectionUrl);
-  if (!url) return false;
-
-  const isComposeEndpoint = url.hostname === 'mongo' && url.port === '27017';
-  const isHostEndpoint =
-    (url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '27018';
-
-  return (
-    url.protocol === 'mongodb:' &&
-    !url.username &&
-    !url.password &&
-    url.pathname === '/relay_test' &&
-    (isComposeEndpoint || isHostEndpoint)
-  );
-}
-
 function isTestRedisUrl(connectionUrl: string): boolean {
   const url = parseConnectionUrl(connectionUrl);
   if (!url) return false;
@@ -109,7 +80,6 @@ if (
   environment.NODE_ENV === 'test' &&
   (environment.TEST_ENV_GUARD !== 'relay-test' ||
     !isTestMysqlUrl(environment.MYSQL_URL) ||
-    (environment.MONGO_URL !== undefined && !isTestMongoUrl(environment.MONGO_URL)) ||
     !isTestRedisUrl(environment.REDIS_URL))
 ) {
   throw new Error('Test environment must use isolated relay_test databases');
@@ -126,10 +96,8 @@ export const config = {
   nodeEnv: environment.NODE_ENV,
   port: environment.PORT,
   mysqlUrl: environment.MYSQL_URL,
-  mongoUrl: environment.MONGO_URL,
   redisUrl: environment.REDIS_URL,
   redisNamespace: environment.REDIS_NAMESPACE,
-  messageBodyCompat: environment.MESSAGE_BODY_COMPAT,
   outbox: {
     batchSize: environment.OUTBOX_RELAY_BATCH_SIZE,
     pollIntervalMs: environment.OUTBOX_RELAY_POLL_INTERVAL_MS,

@@ -4,8 +4,6 @@ x-perf-app-environment: &perf-app-environment
   NODE_ENV: production
   PORT: '3000'
   MYSQL_URL: mysql://relay_perf:relay_perf@mysql:3306/relay_perf?charset=utf8mb4
-  MONGO_URL: mongodb://mongo:27017/relay_perf
-  MESSAGE_BODY_COMPAT: sql-only
   REDIS_URL: redis://redis:6379/0
   REDIS_NAMESPACE: relay-perf
   BCRYPT_COST: '12'
@@ -43,17 +41,6 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-
-  mongo:
-    image: mongo:7.0.40
-    volumes:
-      - mongo_perf_data:/data/db
-    healthcheck:
-      test: ['CMD', 'mongosh', '--quiet', '--eval', 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)']
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 20s
 
   redis:
     image: redis:7.4.11
@@ -145,7 +132,6 @@ services:
 
 volumes:
   mysql_perf_data:
-  mongo_perf_data:
   redis_perf_data:
 
 configs:

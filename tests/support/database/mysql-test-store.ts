@@ -5,7 +5,6 @@ const applicationTables = [
   'auth_sessions',
   'message_outbox',
   'message_bodies',
-  'message_body_backfill_mismatches',
   'messages',
   'conversation_summaries',
   'conversation_participants',
@@ -105,10 +104,6 @@ export async function resetMysqlTestData(): Promise<void> {
       for (const table of applicationTables) {
         await connection.query('TRUNCATE TABLE ' + table);
       }
-
-      await connection.query(
-        'UPDATE message_body_backfill_state SET last_document_id = 0, copied_count = 0 WHERE id = 1'
-      );
     } finally {
       await connection.query('SET FOREIGN_KEY_CHECKS = 1');
     }
@@ -217,7 +212,6 @@ export interface StoredOutboxRow {
   attempts: number;
   availableAt: Date;
   publishedAt: Date | null;
-  mirroredAt: Date | null;
   createdAt: Date;
 }
 
@@ -249,7 +243,6 @@ interface OutboxRowPacket extends RowDataPacket {
   attempts: number;
   availableAt: Date;
   publishedAt: Date | null;
-  mirroredAt: Date | null;
   createdAt: Date;
 }
 
@@ -269,7 +262,7 @@ interface ParticipantStatePacket extends RowDataPacket {
 const outboxSelect =
   'SELECT id, event_id AS eventId, event_type AS eventType, message_id AS messageId, ' +
   'conversation_id AS conversationId, status, attempts, available_at AS availableAt, ' +
-  'published_at AS publishedAt, mirrored_at AS mirroredAt, created_at AS createdAt ' +
+  'published_at AS publishedAt, created_at AS createdAt ' +
   'FROM message_outbox';
 
 export async function findStoredMessageBodyRow(
@@ -289,11 +282,6 @@ export async function countStoredMessageBodyRows(): Promise<number> {
   );
 
   return rows[0]?.count ?? 0;
-}
-
-export async function deleteStoredMessageBodyRows(ids: readonly number[]): Promise<void> {
-  if (!ids.length) return;
-  await getPool().query('DELETE FROM message_bodies WHERE message_id IN (?)', [[...ids]]);
 }
 
 export async function listOutboxRows(): Promise<StoredOutboxRow[]> {
@@ -328,7 +316,6 @@ export async function updateOutboxRow(
   patch: Partial<Pick<StoredOutboxRow, 'status' | 'attempts'>> & {
     availableAt?: Date;
     publishedAt?: Date | null;
-    mirroredAt?: Date | null;
   }
 ): Promise<void> {
   const assignments: string[] = [];
@@ -354,11 +341,6 @@ export async function updateOutboxRow(
     values.push(patch.publishedAt);
   }
 
-  if (patch.mirroredAt !== undefined) {
-    assignments.push('mirrored_at = ?');
-    values.push(patch.mirroredAt);
-  }
-
   if (!assignments.length) return;
 
   values.push(id);
@@ -377,13 +359,12 @@ export async function insertOutboxRow(row: {
   attempts?: number;
   availableAt?: Date;
   publishedAt?: Date | null;
-  mirroredAt?: Date | null;
   createdAt?: Date;
 }): Promise<number> {
   const [result] = await getPool().query(
     'INSERT INTO message_outbox (event_id, event_type, message_id, conversation_id, status, ' +
-      'attempts, available_at, published_at, mirrored_at, created_at) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'attempts, available_at, published_at, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       row.eventId,
       row.eventType,
@@ -393,7 +374,6 @@ export async function insertOutboxRow(row: {
       row.attempts ?? 0,
       row.availableAt ?? new Date(),
       row.publishedAt ?? null,
-      row.mirroredAt ?? null,
       row.createdAt ?? new Date()
     ]
   );

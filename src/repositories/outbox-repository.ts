@@ -26,7 +26,6 @@ export interface OutboxClaimOptions {
 
 export interface OutboxCleanupOptions {
   retentionHours: number;
-  requireMirrored: boolean;
   limit: number;
 }
 
@@ -141,12 +140,10 @@ class SequelizeOutboxRepository implements OutboxRepository {
         `DELETE FROM message_outbox
         WHERE status = 'published'
           AND published_at < DATE_SUB(NOW(3), INTERVAL :retentionHours HOUR)
-          AND (:requireMirrored = 0 OR mirrored_at IS NOT NULL)
         LIMIT :limitRows`,
         {
           replacements: {
             retentionHours: options.retentionHours,
-            requireMirrored: options.requireMirrored ? 1 : 0,
             limitRows: options.limit
           }
         }

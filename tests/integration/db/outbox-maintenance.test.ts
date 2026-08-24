@@ -9,7 +9,7 @@ import {
 
 const hourMs = 3600000;
 
-function createRelay(requireMirroredForCleanup: boolean): OutboxRelay {
+function createRelay(): OutboxRelay {
   return new OutboxRelay(
     { publish: vi.fn().mockResolvedValue(undefined), isReady: () => Promise.resolve(true) },
     {
@@ -20,7 +20,6 @@ function createRelay(requireMirroredForCleanup: boolean): OutboxRelay {
       maxAttempts: 5,
       retentionHours: 72,
       cleanupIntervalMs: 3600000,
-      requireMirroredForCleanup,
       onError: () => undefined
     }
   );
@@ -71,7 +70,7 @@ describe('outbox maintenance', () => {
       createdAt: oldDate
     });
 
-    const deleted = await createRelay(false).runCleanupOnce();
+    const deleted = await createRelay().runCleanupOnce();
 
     expect(deleted).toBe(1);
 
@@ -82,37 +81,6 @@ describe('outbox maintenance', () => {
       'message.created:900003',
       'message.created:900004'
     ]);
-  });
-
-  it('keeps old published rows that are not yet mirrored during the transition window', async () => {
-    const oldDate = new Date(Date.now() - 100 * hourMs);
-
-    await insertOutboxRow({
-      eventId: 'message.created:900011',
-      eventType: 'message.created',
-      messageId: 900011,
-      conversationId: 900011,
-      status: 'published',
-      publishedAt: oldDate,
-      mirroredAt: null,
-      createdAt: oldDate
-    });
-    await insertOutboxRow({
-      eventId: 'message.created:900012',
-      eventType: 'message.created',
-      messageId: 900012,
-      conversationId: 900012,
-      status: 'published',
-      publishedAt: oldDate,
-      mirroredAt: oldDate,
-      createdAt: oldDate
-    });
-
-    const deleted = await createRelay(true).runCleanupOnce();
-
-    expect(deleted).toBe(1);
-    expect(await findOutboxRowByEventId('message.created:900011')).not.toBeNull();
-    expect(await findOutboxRowByEventId('message.created:900012')).toBeNull();
   });
 
   it('moves exhausted pending rows to the failed dead-letter state without deleting them', async () => {
@@ -126,14 +94,14 @@ describe('outbox maintenance', () => {
       availableAt: new Date(Date.now() - 1000)
     });
 
-    await createRelay(false).runRelayCycleOnce();
+    await createRelay().runRelayCycleOnce();
 
     const row = await findOutboxRowByEventId('message.created:900021');
 
     expect(row?.id).toBe(rowId);
     expect(row?.status).toBe('failed');
 
-    const deleted = await createRelay(false).runCleanupOnce();
+    const deleted = await createRelay().runCleanupOnce();
 
     expect(deleted).toBe(0);
     expect(await findOutboxRowByEventId('message.created:900021')).not.toBeNull();

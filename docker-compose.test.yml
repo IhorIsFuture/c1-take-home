@@ -5,7 +5,6 @@ x-test-app-environment: &test-app-environment
   TEST_ENV_GUARD: relay-test
   PORT: '3000'
   MYSQL_URL: mysql://relay_test:relay_test@mysql:3306/relay_test?charset=utf8mb4
-  MONGO_URL: mongodb://mongo:27017/relay_test
   REDIS_URL: redis://redis:6379/15
   REDIS_NAMESPACE: relay-test
   BCRYPT_COST: '10'
@@ -15,7 +14,6 @@ x-test-app-environment: &test-app-environment
   JWT_ACCESS_TTL_SECONDS: '300'
   REFRESH_TOKEN_TTL_SECONDS: '3600'
   DEMO_USER_PASSWORD: RelayTest123!
-  MESSAGE_BODY_COMPAT: sql-only
   OUTBOX_RELAY_POLL_INTERVAL_MS: '250'
   OUTBOX_RELAY_BACKOFF_BASE_SECONDS: '1'
 
@@ -41,17 +39,6 @@ services:
       timeout: 3s
       retries: 30
       start_period: 15s
-
-  mongo:
-    image: mongo:7.0.40
-    volumes:
-      - mongo_test_data:/data/db
-    healthcheck:
-      test: ['CMD', 'mongosh', '--quiet', '--eval', 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)']
-      interval: 2s
-      timeout: 3s
-      retries: 30
-      start_period: 10s
 
   redis:
     image: redis:7.4.11
@@ -117,7 +104,6 @@ services:
 
 volumes:
   mysql_test_data:
-  mongo_test_data:
   redis_test_data:
 
 configs:
