@@ -28,3 +28,4 @@ Progress:
 26. Realtime fixes: conversation.created event, search-view message loss, bfcache socket
 27. Search UX: jump-to-message, bidirectional paging, numeric narrowing, live search
 28. Conversation participants in header, paginated user directory
+29. Login rate limit, refresh race fix, security headers, per-chat drafts

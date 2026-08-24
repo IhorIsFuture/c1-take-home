@@ -105,10 +105,22 @@ const state = {
   conversationRefreshPromise: null,
   realtimeResyncPromise: null,
   typingUsers: new Map(),
-  lastTypingSentAt: 0
+  lastTypingSentAt: 0,
+  drafts: new Map()
 };
 
 let relaySocket = null;
+
+function createClientId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function createElement(tag, className, text) {
   const element = document.createElement(tag);
@@ -224,6 +236,7 @@ function resetApplicationState() {
   state.realtimeResyncPromise = null;
   clearTypingUsers();
   state.lastTypingSentAt = 0;
+  state.drafts.clear();
   elements.app.classList.remove('is-chat-open');
   elements.search.value = '';
   elements.text.value = '';
@@ -851,6 +864,19 @@ async function openConversation(id, title, { aroundMessageId } = {}) {
   state.messagesController?.abort();
   state.searchController?.abort();
 
+  if (state.activeConversationId && state.activeConversationId !== id) {
+    const draft = elements.text.value;
+
+    if (draft.trim()) state.drafts.set(state.activeConversationId, draft);
+    else state.drafts.delete(state.activeConversationId);
+  }
+
+  if (state.activeConversationId !== id) {
+    elements.text.value = state.drafts.get(id) ?? '';
+    state.pendingMessage = null;
+    resizeComposer();
+  }
+
   state.activeConversationId = id;
   state.activeConversationTitle = title ?? getActiveConversation()?.title ?? null;
   state.view = 'conversation';
@@ -1233,7 +1259,7 @@ async function submitMessage(event) {
   const pendingMessage =
     state.pendingMessage?.body === body
       ? state.pendingMessage
-      : { body, clientId: crypto.randomUUID() };
+      : { body, clientId: createClientId() };
 
   state.pendingMessage = pendingMessage;
   state.sending = true;
@@ -1254,6 +1280,7 @@ async function submitMessage(event) {
 
     state.pendingMessage = null;
     elements.text.value = '';
+    state.drafts.delete(state.activeConversationId);
     resizeComposer();
   } catch (error) {
     if (error instanceof ApiError && error.status === 429) {
@@ -1422,7 +1449,7 @@ async function submitConversation(event) {
   const pendingConversation =
     state.pendingConversation?.fingerprint === fingerprint
       ? state.pendingConversation
-      : { fingerprint, clientId: crypto.randomUUID() };
+      : { fingerprint, clientId: createClientId() };
 
   state.pendingConversation = pendingConversation;
   state.creatingConversation = true;

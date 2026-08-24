@@ -14,10 +14,28 @@ export interface CreateAppOptions {
 
 const defaultReadinessCheck: ReadinessCheck = () => false;
 
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "img-src 'self' data:",
+  "connect-src 'self' ws: wss:",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'"
+].join('; ');
+
 export function createApp(options: CreateAppOptions): Express {
   const app = express();
   const checkReadiness = options.checkReadiness ?? defaultReadinessCheck;
 
+  app.set('trust proxy', true);
+  app.disable('x-powered-by');
+  app.use((_request, response, next) => {
+    response.set('X-Content-Type-Options', 'nosniff');
+    response.set('X-Frame-Options', 'DENY');
+    response.set('Referrer-Policy', 'no-referrer');
+    response.set('Content-Security-Policy', contentSecurityPolicy);
+    next();
+  });
   app.use('/health', createHealthRouter(checkReadiness));
   app.use(express.json());
   app.use(express.static('web'));
