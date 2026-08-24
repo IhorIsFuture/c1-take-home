@@ -3,7 +3,7 @@ name: CI and deploy demo
 on:
   push:
     branches:
-      - dev-deploy
+      - dev
   workflow_dispatch:
 
 permissions:
