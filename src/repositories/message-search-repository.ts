@@ -1,5 +1,6 @@
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../db/mysql';
+import type { SearchPlan } from '../services/search';
 
 export interface MessageSearchResult {
   id: number;
@@ -12,15 +13,27 @@ export interface MessageSearchResult {
 }
 
 export interface MessageSearchRepository {
-  search(userId: number, booleanQuery: string, limit: number): Promise<MessageSearchResult[]>;
+  search(userId: number, plan: SearchPlan, limit: number): Promise<MessageSearchResult[]>;
+}
+
+function escapeRegexToken(token: string): string {
+  return token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 class SequelizeMessageSearchRepository implements MessageSearchRepository {
-  async search(
-    userId: number,
-    booleanQuery: string,
-    limit: number
-  ): Promise<MessageSearchResult[]> {
+  async search(userId: number, plan: SearchPlan, limit: number): Promise<MessageSearchResult[]> {
+    const replacements: Record<string, unknown> = {
+      userId,
+      booleanQuery: plan.booleanQuery,
+      limit
+    };
+    const shortTokenConditions = plan.shortTokens
+      .map((token, index) => {
+        replacements[`shortToken${index}`] = `\\b${escapeRegexToken(token)}\\b`;
+        return `AND b.body REGEXP :shortToken${index}`;
+      })
+      .join('\n      ');
+
     return sequelize.query<MessageSearchResult>(
       `SELECT m.id, m.conversation_id AS conversationId, c.title AS conversationTitle,
         m.sender_id AS senderId, u.name AS senderName, b.body, m.created_at AS createdAt
@@ -31,9 +44,10 @@ class SequelizeMessageSearchRepository implements MessageSearchRepository {
       JOIN conversations c ON c.id = m.conversation_id
       JOIN users u ON u.id = m.sender_id
       WHERE MATCH(b.body) AGAINST(:booleanQuery IN BOOLEAN MODE)
+      ${shortTokenConditions}
       ORDER BY MATCH(b.body) AGAINST(:booleanQuery IN BOOLEAN MODE) DESC, m.id DESC
       LIMIT :limit`,
-      { replacements: { userId, booleanQuery, limit }, type: QueryTypes.SELECT }
+      { replacements, type: QueryTypes.SELECT }
     );
   }
 }

@@ -118,6 +118,26 @@ describe('GET /api/search', () => {
     expect((await search(actor, 'ab cd')).body).toEqual([]);
   });
 
+  it('narrows results with short numeric tokens as whole words', async () => {
+    const actor = await createRegisteredUser();
+    const participant = await createRegisteredUser();
+    const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
+
+    await seedStoredMessages(
+      conversation.id,
+      actor.auth.user.id,
+      Array.from({ length: 25 }, (_, index) => `needle haystack entry ${index + 1}`)
+    );
+
+    const narrowed = await search(actor, 'needle 7');
+    const teens = await search(actor, 'needle 17');
+
+    expect(narrowed.body).toHaveLength(1);
+    expect(narrowed.body[0].body).toBe('needle haystack entry 7');
+    expect(teens.body).toHaveLength(1);
+    expect(teens.body[0].body).toBe('needle haystack entry 17');
+  });
+
   it('caps results at the default and requested limits', async () => {
     const actor = await createRegisteredUser();
     const participant = await createRegisteredUser();

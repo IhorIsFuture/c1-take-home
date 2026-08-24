@@ -93,6 +93,60 @@ describe('message history pagination', () => {
     expect(collected.map(message => message.id)).toEqual(sentIds);
   });
 
+  it('pages forward with afterId and rejects mixed cursors', async () => {
+    const actor = await createRegisteredUser();
+    const participant = await createRegisteredUser();
+    const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
+    const sentIds = await seedStoredMessages(
+      conversation.id,
+      actor.auth.user.id,
+      Array.from({ length: 12 }, (_, index) => `Forward ${index + 1}`)
+    );
+
+    const forward = await actor.client.request<MessageResponse[]>(
+      `/api/conversations/${conversation.id}/messages?limit=5&afterId=${sentIds[3]}`,
+      { accessToken: actor.auth.accessToken }
+    );
+    const tail = await actor.client.request<MessageResponse[]>(
+      `/api/conversations/${conversation.id}/messages?limit=5&afterId=${sentIds[10]}`,
+      { accessToken: actor.auth.accessToken }
+    );
+    const beyond = await actor.client.request<MessageResponse[]>(
+      `/api/conversations/${conversation.id}/messages?limit=5&afterId=${sentIds[11]}`,
+      { accessToken: actor.auth.accessToken }
+    );
+    const mixed = await actor.client.request<MessageResponse[]>(
+      `/api/conversations/${conversation.id}/messages?limit=5&afterId=${sentIds[3]}&beforeId=${sentIds[10]}`,
+      { accessToken: actor.auth.accessToken }
+    );
+
+    expect(forward.status).toBe(200);
+    expect(forward.body.map(message => message.id)).toEqual(sentIds.slice(4, 9));
+    expect(tail.body.map(message => message.id)).toEqual([sentIds[11]]);
+    expect(beyond.body).toEqual([]);
+    expect(mixed.status).toBe(400);
+  });
+
+  it('returns the window ending at a found message for search jumps', async () => {
+    const actor = await createRegisteredUser();
+    const participant = await createRegisteredUser();
+    const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
+    const sentIds = await seedStoredMessages(
+      conversation.id,
+      actor.auth.user.id,
+      Array.from({ length: 10 }, (_, index) => `Jump ${index + 1}`)
+    );
+    const foundId = sentIds[6];
+
+    const window = await actor.client.request<MessageResponse[]>(
+      `/api/conversations/${conversation.id}/messages?limit=5&beforeId=${foundId + 1}`,
+      { accessToken: actor.auth.accessToken }
+    );
+
+    expect(window.body.map(message => message.id)).toEqual(sentIds.slice(2, 7));
+    expect(window.body.at(-1)?.id).toBe(foundId);
+  });
+
   it('keeps pages stable while new messages arrive between requests', async () => {
     const actor = await createRegisteredUser();
     const participant = await createRegisteredUser();

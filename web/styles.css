@@ -2100,3 +2100,8 @@ svg {
   color: var(--text-soft);
   margin-top: 2px;
 }
+
+.message-row.is-highlighted .message-bubble {
+  box-shadow: 0 0 0 2px var(--primary);
+  transition: box-shadow 0.3s ease;
+}

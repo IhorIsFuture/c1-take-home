@@ -5,17 +5,26 @@ import {
 
 const minTokenLength = 3;
 const maxTokens = 10;
+const maxShortTokens = 5;
 
-export function buildBooleanQuery(query: string): string | null {
+export interface SearchPlan {
+  booleanQuery: string;
+  shortTokens: string[];
+}
+
+export function buildSearchPlan(query: string): SearchPlan | null {
   const tokens = query
     .split(/\s+/)
     .map(token => token.replace(/[+\-<>~*"()@]/g, ''))
-    .filter(token => token.length >= minTokenLength)
-    .slice(0, maxTokens);
+    .filter(Boolean);
+  const fulltextTokens = tokens.filter(token => token.length >= minTokenLength).slice(0, maxTokens);
 
-  if (!tokens.length) return null;
+  if (!fulltextTokens.length) return null;
 
-  return tokens.map(token => `+${token}*`).join(' ');
+  return {
+    booleanQuery: fulltextTokens.map(token => `+${token}*`).join(' '),
+    shortTokens: tokens.filter(token => token.length < minTokenLength).slice(0, maxShortTokens)
+  };
 }
 
 export async function searchMessages(
@@ -23,9 +32,9 @@ export async function searchMessages(
   query: string,
   limit: number
 ): Promise<MessageSearchResult[]> {
-  const booleanQuery = buildBooleanQuery(query);
+  const plan = buildSearchPlan(query);
 
-  if (!booleanQuery) return [];
+  if (!plan) return [];
 
-  return messageSearchRepository.search(userId, booleanQuery, limit);
+  return messageSearchRepository.search(userId, plan, limit);
 }

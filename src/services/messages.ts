@@ -9,6 +9,7 @@ import { conversationSummaryRepository } from '../repositories/conversation-summ
 import { messageBodyRepository } from '../repositories/message-body-repository';
 import {
   messageMetadataRepository,
+  type MessagePageCursor,
   type MessageRecord
 } from '../repositories/message-metadata-repository';
 import { outboxRepository } from '../repositories/outbox-repository';
@@ -193,14 +194,16 @@ export async function createMessage(
 export async function listConversationMessages(
   userId: number,
   conversationId: number,
-  beforeId: number | undefined,
+  cursor: MessagePageCursor,
   limit: number
 ): Promise<MessageDto[]> {
   await requireConversationAccess(conversationId, userId);
 
-  const records = await messageMetadataRepository.findPage(conversationId, beforeId, limit);
+  const records = await messageMetadataRepository.findPage(conversationId, cursor, limit);
 
   reportMissingBodies(records);
 
-  return records.map(toMessageDto).reverse();
+  const page = records.map(toMessageDto);
+
+  return cursor.afterId === undefined ? page.reverse() : page;
 }

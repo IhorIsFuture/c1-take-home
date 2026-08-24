@@ -79,12 +79,16 @@ const state = {
   loadingConversations: true,
   loadingMessages: false,
   loadingEarlierMessages: false,
+  loadingNewerMessages: false,
   hasMoreMessages: false,
+  hasNewerMessages: false,
+  highlightedMessageId: null,
   sending: false,
   searchQuery: '',
   pendingMessage: null,
   messagesController: null,
   searchController: null,
+  searchDebounceTimer: null,
   participantController: null,
   participantSearchTimer: null,
   participantUsers: [],
@@ -189,12 +193,16 @@ function resetApplicationState() {
   state.loadingConversations = true;
   state.loadingMessages = false;
   state.loadingEarlierMessages = false;
+  state.loadingNewerMessages = false;
   state.hasMoreMessages = false;
+  state.hasNewerMessages = false;
+  state.highlightedMessageId = null;
   state.sending = false;
   state.searchQuery = '';
   state.pendingMessage = null;
   state.messagesController?.abort();
   state.searchController?.abort();
+  clearTimeout(state.searchDebounceTimer);
   state.participantController?.abort();
   clearTimeout(state.participantSearchTimer);
   state.selectedParticipants.clear();
@@ -535,6 +543,8 @@ function renderMessageLoading() {
 function createMessageElement(message) {
   const own = message.senderId === state.user?.id;
   const row = createElement('article', own ? 'message-row is-own' : 'message-row');
+  row.dataset.messageId = String(message.id);
+  if (message.id === state.highlightedMessageId) row.classList.add('is-highlighted');
   const bubble = createElement('div', 'message-bubble');
 
   row.dataset.messageId = message.id;
@@ -717,7 +727,9 @@ function renderSearchResults(query, results) {
       createElement('span', '', result.body ?? ''),
       createElement('span', 'search-result-meta', meta)
     );
-    button.addEventListener('click', () => openConversation(result.conversationId, resultTitle));
+    button.addEventListener('click', () =>
+      openConversation(result.conversationId, resultTitle, { aroundMessageId: result.id })
+    );
     container.appendChild(button);
   }
 
@@ -802,7 +814,7 @@ function markConversationReadOnServer(conversationId, throughMessageId) {
   markConversationRead(conversationId, throughMessageId).catch(() => undefined);
 }
 
-async function openConversation(id, title) {
+async function openConversation(id, title, { aroundMessageId } = {}) {
   state.messagesController?.abort();
   state.searchController?.abort();
 
@@ -812,6 +824,8 @@ async function openConversation(id, title) {
   state.loadingMessages = true;
   state.messages = [];
   state.hasMoreMessages = false;
+  state.hasNewerMessages = false;
+  state.highlightedMessageId = aroundMessageId ?? null;
   clearTypingUsers();
 
   elements.app.classList.add('is-chat-open');
@@ -824,10 +838,14 @@ async function openConversation(id, title) {
   state.messagesController = controller;
 
   try {
-    const messages = await getMessages(id, { limit: 30 }, controller.signal);
+    const pageOptions = aroundMessageId
+      ? { beforeId: aroundMessageId + 1, limit: 30 }
+      : { limit: 30 };
+    const messages = await getMessages(id, pageOptions, controller.signal);
     if (controller !== state.messagesController) return;
 
     state.hasMoreMessages = messages.length === 30;
+    state.hasNewerMessages = !!aroundMessageId;
     const liveMessages = state.messages.filter(message => message.conversationId === id);
     const merged = new Map(messages.map(message => [message.id, message]));
     for (const message of liveMessages) merged.set(message.id, message);
@@ -844,7 +862,12 @@ async function openConversation(id, title) {
     setComposerAvailability();
     renderMessages();
     markConversationReadOnServer(id, state.messages[state.messages.length - 1]?.id);
-    requestAnimationFrame(maybeLoadEarlierMessages);
+
+    if (aroundMessageId) {
+      revealHighlightedMessage(aroundMessageId);
+    } else {
+      requestAnimationFrame(maybeLoadEarlierMessages);
+    }
   } catch (error) {
     if (error.name === 'AbortError') return;
     state.loadingMessages = false;
@@ -853,20 +876,45 @@ async function openConversation(id, title) {
       title: 'Messages could not be loaded',
       description: error.message,
       actionLabel: 'Try again',
-      action: () => openConversation(id, title)
+      action: () => openConversation(id, title, { aroundMessageId })
     });
     setComposerAvailability();
   }
 }
 
+function revealHighlightedMessage(messageId) {
+  const row = elements.messages.querySelector(`[data-message-id="${messageId}"]`);
+  row?.scrollIntoView({ block: 'center' });
+
+  setTimeout(() => {
+    const clearHighlight = () => {
+      state.highlightedMessageId = null;
+      elements.messages
+        .querySelector('.message-row.is-highlighted')
+        ?.classList.remove('is-highlighted');
+      elements.messages.removeEventListener('click', clearHighlight);
+      elements.messages.removeEventListener('scroll', clearHighlight);
+    };
+
+    elements.messages.addEventListener('click', clearHighlight, { once: true });
+    elements.messages.addEventListener('scroll', clearHighlight, { once: true });
+  }, 300);
+}
+
 function maybeLoadEarlierMessages() {
-  if (state.view !== 'conversation' || !state.hasMoreMessages || state.loadingEarlierMessages) {
-    return;
+  if (state.view !== 'conversation') return;
+
+  const container = elements.messages;
+  const noScrollbar = container.scrollHeight <= container.clientHeight;
+
+  if (state.hasMoreMessages && !state.loadingEarlierMessages) {
+    if (container.scrollTop < 200 || noScrollbar) void loadEarlierMessages();
   }
 
-  const nearTop = elements.messages.scrollTop < 200;
-  const noScrollbar = elements.messages.scrollHeight <= elements.messages.clientHeight;
-  if (nearTop || noScrollbar) void loadEarlierMessages();
+  if (state.hasNewerMessages && !state.loadingNewerMessages) {
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+    if (nearBottom || noScrollbar) void loadNewerMessages();
+  }
 }
 
 function prependMessagesToRail(olderMessages) {
@@ -902,6 +950,58 @@ function prependMessagesToRail(olderMessages) {
   const previousTop = container.scrollTop;
   rail.prepend(fragment);
   container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
+}
+
+async function loadNewerMessages() {
+  const conversationId = state.activeConversationId;
+  const newestMessageId = state.messages[state.messages.length - 1]?.id;
+  if (!conversationId || !newestMessageId || state.loadingNewerMessages) return;
+
+  state.loadingNewerMessages = true;
+
+  try {
+    const messages = await getMessages(conversationId, { afterId: newestMessageId, limit: 30 });
+    if (state.activeConversationId !== conversationId) return;
+
+    state.hasNewerMessages = messages.length === 30;
+    const knownIds = new Set(state.messages.map(message => message.id));
+    const newerMessages = messages.filter(message => !knownIds.has(message.id));
+    if (!newerMessages.length) return;
+
+    state.messages = [...state.messages, ...newerMessages];
+    for (const message of newerMessages) state.seenMessageIds.add(message.id);
+    appendMessagesToRail(newerMessages);
+    markConversationReadOnServer(conversationId, state.messages[state.messages.length - 1]?.id);
+  } catch (error) {
+    showToast(error.message ?? 'Newer messages could not be loaded.', 'error');
+  } finally {
+    state.loadingNewerMessages = false;
+  }
+}
+
+function appendMessagesToRail(newerMessages) {
+  const container = elements.messages;
+  const rail = container.querySelector('.message-rail');
+
+  if (!rail) {
+    renderMessages({ preserveScroll: true });
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  const lastRenderedDivider = [...rail.querySelectorAll('.date-divider')].at(-1);
+  let currentDate = lastRenderedDivider?.textContent ?? '';
+
+  for (const message of newerMessages) {
+    const messageDate = formatMessageDate(message.createdAt);
+    if (messageDate && messageDate !== currentDate) {
+      currentDate = messageDate;
+      fragment.appendChild(createElement('div', 'date-divider', messageDate));
+    }
+    fragment.appendChild(createMessageElement(message));
+  }
+
+  rail.appendChild(fragment);
 }
 
 async function loadEarlierMessages() {
@@ -986,7 +1086,7 @@ function receiveMessage(message) {
     markConversationReadOnServer(message.conversationId, message.id);
   }
 
-  if (message.conversationId === state.activeConversationId) {
+  if (message.conversationId === state.activeConversationId && !state.hasNewerMessages) {
     state.messages.push(message);
     state.messages.sort((left, right) => left.id - right.id);
 
@@ -1110,7 +1210,13 @@ async function submitMessage(event) {
       body,
       clientId: pendingMessage.clientId
     });
-    receiveMessage(message);
+
+    if (state.hasNewerMessages) {
+      await openConversation(state.activeConversationId, state.activeConversationTitle);
+    } else {
+      receiveMessage(message);
+    }
+
     state.pendingMessage = null;
     elements.text.value = '';
     resizeComposer();
@@ -1274,6 +1380,10 @@ async function submitConversation(event) {
   }
 }
 
+function hasSearchableToken(query) {
+  return query.split(/\s+/).some(token => token.replace(/[+\-<>~*"()@]/g, '').length >= 3);
+}
+
 async function performSearch(query) {
   state.messagesController?.abort();
   state.searchController?.abort();
@@ -1282,6 +1392,16 @@ async function performSearch(query) {
   elements.app.classList.add('is-chat-open');
   renderHeader();
   setComposerAvailability();
+
+  if (!hasSearchableToken(query)) {
+    renderMainState({
+      eyebrow: 'Search',
+      title: 'Type at least 3 characters',
+      description: 'Search looks for words of three characters or longer.'
+    });
+    return;
+  }
+
   renderSearchLoading();
 
   const controller = new AbortController();
@@ -1304,6 +1424,7 @@ async function performSearch(query) {
 }
 
 function clearSearch() {
+  clearTimeout(state.searchDebounceTimer);
   state.searchController?.abort();
   state.searchQuery = '';
   state.view = state.activeConversationId ? 'conversation' : 'welcome';
@@ -1352,12 +1473,27 @@ elements.newConversationDialog.addEventListener('cancel', event => {
 
 elements.searchForm.addEventListener('submit', event => {
   event.preventDefault();
+  clearTimeout(state.searchDebounceTimer);
   const query = elements.search.value.trim();
   if (query) performSearch(query);
   else clearSearch();
 });
 elements.search.addEventListener('input', () => {
   elements.clearSearch.hidden = !elements.search.value;
+  clearTimeout(state.searchDebounceTimer);
+
+  const query = elements.search.value.trim();
+
+  if (!query) {
+    if (state.view === 'search') clearSearch();
+    return;
+  }
+
+  if (!hasSearchableToken(query)) return;
+
+  state.searchDebounceTimer = setTimeout(() => {
+    if (elements.search.value.trim() === query) performSearch(query);
+  }, 400);
 });
 elements.search.addEventListener('keydown', event => {
   if (event.key === 'Escape') clearSearch();

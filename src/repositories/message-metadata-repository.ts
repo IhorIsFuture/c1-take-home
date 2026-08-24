@@ -22,12 +22,17 @@ export interface MessageRecord {
   body: string | null;
 }
 
+export interface MessagePageCursor {
+  beforeId?: number;
+  afterId?: number;
+}
+
 export interface MessageMetadataRepository {
   findByClientKey(key: MessageClientKey): Promise<MessageRecord | null>;
   insertMetadata(input: NewMessageMetadata, transaction: Transaction): Promise<number>;
   findPage(
     conversationId: number,
-    beforeId: number | undefined,
+    cursor: MessagePageCursor,
     limit: number
   ): Promise<MessageRecord[]>;
   findByIds(ids: readonly number[]): Promise<MessageRecord[]>;
@@ -88,17 +93,22 @@ class SequelizeMessageMetadataRepository implements MessageMetadataRepository {
 
   async findPage(
     conversationId: number,
-    beforeId: number | undefined,
+    cursor: MessagePageCursor,
     limit: number
   ): Promise<MessageRecord[]> {
+    const forward = cursor.afterId !== undefined;
     const messages = await Message.findAll({
       attributes: recordAttributes,
       where: {
         conversationId,
-        ...(beforeId === undefined ? {} : { id: { [Op.lt]: beforeId } })
+        ...(forward
+          ? { id: { [Op.gt]: cursor.afterId } }
+          : cursor.beforeId === undefined
+            ? {}
+            : { id: { [Op.lt]: cursor.beforeId } })
       },
       include: [senderInclude, bodyInclude],
-      order: [['id', 'DESC']],
+      order: [['id', forward ? 'ASC' : 'DESC']],
       limit
     });
 
