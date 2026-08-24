@@ -8,7 +8,6 @@ import { connectMysql, disconnectMysql, isMysqlReady } from './db/mysql';
 import { OutboxRelay } from './outbox/outbox-relay';
 import { RedisRealtimePubSub } from './realtime/index';
 import { verifyAccessToken } from './security/access-token';
-import { setLegacyBodyReader } from './services/messages';
 import { attachWs } from './ws/hub';
 
 const shutdownGracePeriodMs = 5000;
@@ -24,12 +23,6 @@ export interface RunningServer {
   webSocketServer: WebSocketServer;
   port: number;
   stop: () => Promise<void>;
-}
-
-interface LegacyRuntime {
-  connectMongo(): Promise<void>;
-  disconnectMongo(): Promise<void>;
-  isMongoReady(): Promise<boolean>;
 }
 
 function listen(server: Server, port: number): Promise<number> {
@@ -138,8 +131,7 @@ async function stopResources(
   webSocketServer: WebSocketServer,
   realtimePubSub: RedisRealtimePubSub,
   outboxRelay: OutboxRelay,
-  legacyRuntime: LegacyRuntime | undefined,
-  connections: { mongo: boolean; mysql: boolean; redis: boolean }
+  connections: { mysql: boolean; redis: boolean }
 ): Promise<void> {
   await outboxRelay.stop();
   const transportResults = await Promise.allSettled([
@@ -150,7 +142,6 @@ async function stopResources(
     ...(connections.redis ? [realtimePubSub.close()] : [])
   ]);
   const databaseResults = await Promise.allSettled([
-    ...(connections.mongo && legacyRuntime ? [legacyRuntime.disconnectMongo()] : []),
     ...(connections.mysql ? [disconnectMysql()] : [])
   ]);
   const errors = [...transportResults, ...realtimeResults, ...databaseResults]
@@ -163,8 +154,7 @@ async function stopResources(
 export async function startServer(options: StartServerOptions = {}): Promise<RunningServer> {
   let ready = false;
   let dependencyReadinessCheck: Promise<boolean> | undefined;
-  let legacyRuntime: LegacyRuntime | undefined;
-  const connections = { mongo: false, mysql: false, redis: false };
+  const connections = { mysql: false, redis: false };
   const server = http.createServer();
   const { webSocketServer, deliver, broadcast } = attachWs(server, { verifyAccessToken });
   const realtimePubSub = new RedisRealtimePubSub({
@@ -173,21 +163,14 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     onSubscriberUnavailable: () => broadcast({ type: 'realtime_unavailable' }),
     onSubscriberRecovered: () => broadcast({ type: 'resync_required' })
   });
-  const outboxRelay = new OutboxRelay(realtimePubSub, {
-    ...config.outbox,
-    requireMirroredForCleanup: config.messageBodyCompat === 'transition'
-  });
+  const outboxRelay = new OutboxRelay(realtimePubSub, config.outbox);
   const app = createApp({
     realtimePublisher: realtimePubSub,
     checkReadiness: async () => {
       if (!ready) return false;
 
-      dependencyReadinessCheck ??= Promise.all([
-        isMysqlReady(),
-        legacyRuntime ? legacyRuntime.isMongoReady() : Promise.resolve(true),
-        realtimePubSub.isReady()
-      ])
-        .then(([mysqlReady, mongoReady, redisReady]) => mysqlReady && mongoReady && redisReady)
+      dependencyReadinessCheck ??= Promise.all([isMysqlReady(), realtimePubSub.isReady()])
+        .then(([mysqlReady, redisReady]) => mysqlReady && redisReady)
         .finally(() => {
           dependencyReadinessCheck = undefined;
         });
@@ -200,16 +183,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   try {
     await connectMysql();
     connections.mysql = true;
-
-    if (config.messageBodyCompat === 'transition') {
-      const legacy = await import('./legacy/runtime');
-      legacyRuntime = legacy;
-      await legacy.connectMongo();
-      connections.mongo = true;
-      setLegacyBodyReader(legacy.createLegacyBodyReader());
-    } else {
-      setLegacyBodyReader(null);
-    }
 
     await realtimePubSub.start(({ recipientUserIds, event }) => {
       if (event.type !== 'message.created') return;
@@ -233,7 +206,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
           webSocketServer,
           realtimePubSub,
           outboxRelay,
-          legacyRuntime,
           connections
         );
         return stopPromise;
@@ -241,14 +213,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     };
   } catch (error) {
     ready = false;
-    await stopResources(
-      server,
-      webSocketServer,
-      realtimePubSub,
-      outboxRelay,
-      legacyRuntime,
-      connections
-    ).catch(() => undefined);
+    await stopResources(server, webSocketServer, realtimePubSub, outboxRelay, connections).catch(
+      () => undefined
+    );
     throw error;
   }
 }

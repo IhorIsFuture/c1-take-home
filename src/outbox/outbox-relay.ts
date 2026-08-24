@@ -13,7 +13,6 @@ export interface OutboxRelayOptions {
   maxAttempts: number;
   retentionHours: number;
   cleanupIntervalMs: number;
-  requireMirroredForCleanup: boolean;
   onError?: (error: unknown) => void;
 }
 
@@ -130,7 +129,6 @@ export class OutboxRelay {
     while (true) {
       const affected = await outboxRepository.deletePublishedBatch({
         retentionHours: this.options.retentionHours,
-        requireMirrored: this.options.requireMirroredForCleanup,
         limit: cleanupBatchSize
       });
 

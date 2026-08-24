@@ -20,7 +20,6 @@ const testEnvironment = {
   TEST_ENV_GUARD: 'relay-test',
   PORT: '3000',
   MYSQL_URL: 'mysql://relay_test:relay_test@127.0.0.1:13306/relay_test?charset=utf8mb4',
-  MONGO_URL: 'mongodb://127.0.0.1:27018/relay_test',
   REDIS_URL: 'redis://127.0.0.1:16379/15',
   REDIS_NAMESPACE: 'relay-test',
   BCRYPT_COST: '10',

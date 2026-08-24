@@ -8,7 +8,7 @@ import {
   findParticipantState
 } from '../../support/database/mysql-test-store';
 
-const stageOneMigrationCount = 7;
+const consolidationMigrationCount = 8;
 const legacyPasswordHash = '$2b$12$EmXCbJ4SnQP0Jd4OrjxWoO9bwD5qpYGz.FosBbWcupx7v8clLVUv2';
 
 async function insertLegacyDataset(): Promise<void> {
@@ -65,13 +65,14 @@ describe('stage one migrations', () => {
     await mysqlMigrator.down({ to: 0 });
     const applied = await mysqlMigrator.up();
 
-    expect(applied.length).toBe(16);
+    expect(applied.length).toBe(17);
     expect(await columnType('messages', 'id')).toBe('bigint');
     expect(await columnType('message_bodies', 'message_id')).toBe('bigint');
     expect(await columnType('conversation_participants', 'last_read_message_id')).toBe('bigint');
     expect(await tableExists('conversation_summaries')).toBe(true);
     expect(await tableExists('message_outbox')).toBe(true);
-    expect(await tableExists('message_body_backfill_state')).toBe(true);
+    expect(await tableExists('message_body_backfill_state')).toBe(false);
+    expect(await columnType('message_outbox', 'mirrored_at')).toBe('missing');
 
     const participantIndexes = await sequelize.query<{ INDEX_NAME: string }>(
       `SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS
@@ -83,17 +84,10 @@ describe('stage one migrations', () => {
       'PRIMARY',
       'conversation_participants_user_id_idx'
     ]);
-
-    const stateRows = await sequelize.query<{ lastDocumentId: number }>(
-      'SELECT last_document_id AS lastDocumentId FROM message_body_backfill_state WHERE id = 1',
-      { type: QueryTypes.SELECT }
-    );
-
-    expect(stateRows).toHaveLength(1);
   }, 120000);
 
   it('upgrades a legacy database and initializes read state as history-read', async () => {
-    await mysqlMigrator.down({ step: stageOneMigrationCount });
+    await mysqlMigrator.down({ step: consolidationMigrationCount });
     await insertLegacyDataset();
 
     process.env.READ_STATE_INIT = 'history-read';
@@ -117,7 +111,7 @@ describe('stage one migrations', () => {
   }, 120000);
 
   it('upgrades a legacy database and initializes read state as all-unread', async () => {
-    await mysqlMigrator.down({ step: stageOneMigrationCount });
+    await mysqlMigrator.down({ step: consolidationMigrationCount });
     await insertLegacyDataset();
 
     process.env.READ_STATE_INIT = 'all-unread';
