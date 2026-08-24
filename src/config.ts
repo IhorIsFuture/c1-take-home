@@ -28,7 +28,9 @@ const environmentSchema = z.object({
   OUTBOX_RELAY_BACKOFF_CAP_SECONDS: z.coerce.number().int().min(1).default(300),
   OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(10),
   OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(1).default(72),
-  OUTBOX_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(1000).default(3600000)
+  OUTBOX_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(1000).default(3600000),
+  RATE_LIMIT_MESSAGE_CREATE_LIMIT: z.coerce.number().int().min(1).default(5),
+  RATE_LIMIT_MESSAGE_CREATE_WINDOW_SECONDS: z.coerce.number().int().min(1).default(10)
 });
 
 const environment = environmentSchema.parse(process.env);
@@ -106,6 +108,12 @@ export const config = {
     maxAttempts: environment.OUTBOX_RELAY_MAX_ATTEMPTS,
     retentionHours: environment.OUTBOX_RETENTION_HOURS,
     cleanupIntervalMs: environment.OUTBOX_CLEANUP_INTERVAL_MS
+  },
+  rateLimit: {
+    messageCreate: {
+      limit: environment.RATE_LIMIT_MESSAGE_CREATE_LIMIT,
+      windowSeconds: environment.RATE_LIMIT_MESSAGE_CREATE_WINDOW_SECONDS
+    }
   },
   auth: {
     bcryptCost: environment.BCRYPT_COST,

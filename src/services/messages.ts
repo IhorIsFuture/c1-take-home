@@ -1,6 +1,7 @@
 import { Transaction, UniqueConstraintError } from 'sequelize';
 import { isDeadlockError } from '../db/errors';
 import { sequelize } from '../db/mysql';
+import { config } from '../config';
 import { HttpError } from '../errors/http-error';
 import { conversationReadStateRepository } from '../repositories/conversation-read-state-repository';
 import { conversationRepository } from '../repositories/conversation-repository';
@@ -12,6 +13,8 @@ import {
 } from '../repositories/message-metadata-repository';
 import { outboxRepository } from '../repositories/outbox-repository';
 import { userRepository } from '../repositories/user-repository';
+import { RateLimitError } from '../errors/rate-limit-error';
+import type { RateLimiter } from '../rate-limit/redis-rate-limiter';
 import type { RealtimePublisher } from '../realtime/index';
 import { hashMessageBody } from './message-body-hash';
 
@@ -70,9 +73,22 @@ function toMessageDto(record: MessageRecord): MessageDto {
 export async function createMessage(
   userId: number,
   input: NewMessage,
-  realtimePublisher: RealtimePublisher
+  realtimePublisher: RealtimePublisher,
+  rateLimiter: RateLimiter
 ): Promise<{ message: MessageDto; created: boolean }> {
   const { conversationId, body, clientId } = input;
+  const decision = await rateLimiter.consume(
+    `message-create:${userId}:${conversationId}`,
+    config.rateLimit.messageCreate
+  );
+
+  if (!decision.allowed) {
+    throw new RateLimitError(
+      'Too many messages in this conversation, slow down',
+      decision.retryAfterSeconds
+    );
+  }
+
   const participantIds = await conversationRepository.listParticipantIds(conversationId);
 
   if (!participantIds.includes(userId)) {

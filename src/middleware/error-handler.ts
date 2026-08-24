@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler } from 'express';
 import { HttpError } from '../errors/http-error';
+import { RateLimitError } from '../errors/rate-limit-error';
 
 interface InvalidJsonError extends SyntaxError {
   status: 400;
@@ -23,6 +24,10 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, request, respo
   }
 
   if (error instanceof HttpError) {
+    if (error instanceof RateLimitError) {
+      response.set('Retry-After', String(error.retryAfterSeconds));
+    }
+
     response.status(error.statusCode).json({
       error: error.message,
       code: error.code,

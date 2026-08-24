@@ -131,7 +131,7 @@ describe('message creation idempotency', () => {
     const participant = await createRegisteredUser();
     const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
     const input = buildCreateMessageInput(conversation.id);
-    const requestCount = 8;
+    const requestCount = 4;
     const responses = await Promise.all(
       Array.from({ length: requestCount }, () =>
         actor.client.fork().request<MessageResponse>('/api/messages', {

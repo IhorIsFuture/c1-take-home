@@ -6,6 +6,7 @@ x-perf-app-environment: &perf-app-environment
   MYSQL_URL: mysql://relay_perf:relay_perf@mysql:3306/relay_perf?charset=utf8mb4
   REDIS_URL: redis://redis:6379/0
   REDIS_NAMESPACE: relay-perf
+  RATE_LIMIT_MESSAGE_CREATE_LIMIT: '100000'
   BCRYPT_COST: '12'
   JWT_ACCESS_SECRET: relay-performance-access-secret-with-at-least-32-characters
   JWT_ISSUER: relay-perf-api

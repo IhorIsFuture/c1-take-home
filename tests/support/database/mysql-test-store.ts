@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createPool, type Pool, type RowDataPacket } from 'mysql2/promise';
 import { testEnvironment } from '../test-environment';
 
@@ -406,6 +407,36 @@ export async function findParticipantState(
   );
 
   return rows[0] ?? null;
+}
+
+export async function seedStoredMessages(
+  conversationId: number,
+  senderId: number,
+  bodies: readonly string[]
+): Promise<number[]> {
+  if (!bodies.length) return [];
+
+  const baseTime = Date.now() - bodies.length * 1000;
+  const messageRows = bodies.map((body, index) => [
+    conversationId,
+    senderId,
+    createHash('sha256').update(body).digest('hex'),
+    new Date(baseTime + index * 1000)
+  ]);
+  const [result] = await getPool().query(
+    'INSERT INTO messages (conversation_id, sender_id, client_id, body_hash, created_at) VALUES ' +
+      messageRows.map(() => '(?, ?, NULL, ?, ?)').join(', '),
+    messageRows.flat()
+  );
+  const firstId = (result as { insertId: number }).insertId;
+  const ids = bodies.map((_, index) => firstId + index);
+
+  await getPool().query(
+    'INSERT INTO message_bodies (message_id, body) VALUES ' + bodies.map(() => '(?, ?)').join(', '),
+    ids.flatMap((id, index) => [id, bodies[index]])
+  );
+
+  return ids;
 }
 
 export async function closeMysqlTestStore(): Promise<void> {
