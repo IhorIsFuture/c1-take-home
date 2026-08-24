@@ -94,4 +94,3 @@
               "$actual_user" \
               "$deploy_path"
             REMOTE
-    YAML
