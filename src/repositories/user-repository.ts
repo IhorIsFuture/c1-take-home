@@ -21,7 +21,12 @@ export interface UserRepository {
   findByNormalizedEmail(email: string): Promise<UserCredentials | null>;
   findPublicById(id: number): Promise<PublicUser | null>;
   create(input: NewUser, transaction?: Transaction): Promise<PublicUser>;
-  search(query: string, excludeUserId: number, limit: number): Promise<PublicUser[]>;
+  search(
+    query: string,
+    excludeUserId: number,
+    limit: number,
+    offset: number
+  ): Promise<PublicUser[]>;
   findExistingIds(ids: readonly number[]): Promise<number[]>;
 }
 
@@ -65,7 +70,12 @@ class SequelizeUserRepository implements UserRepository {
     return toPublicUser(user);
   }
 
-  async search(query: string, excludeUserId: number, limit: number): Promise<PublicUser[]> {
+  async search(
+    query: string,
+    excludeUserId: number,
+    limit: number,
+    offset: number
+  ): Promise<PublicUser[]> {
     const escapedQuery = query.trim().replace(/[\\%_]/g, '\\$&');
     const users = await User.findAll({
       where: {
@@ -79,7 +89,8 @@ class SequelizeUserRepository implements UserRepository {
         ['name', 'ASC'],
         ['id', 'ASC']
       ],
-      limit: Math.max(1, Math.min(limit, 50))
+      limit: Math.max(1, Math.min(limit, 50)),
+      offset
     });
 
     return users.map(toPublicUser);

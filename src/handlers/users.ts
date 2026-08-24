@@ -11,9 +11,9 @@ export const currentUserHandler: RequestHandler = async (request, response) => {
 };
 
 export const searchUsersHandler: ValidatedHandler<SearchUsersRequest> = async (
-  { query: { query, limit } },
+  { query: { query, limit, offset } },
   { request, response }
 ) => {
   const { userId } = requireAuth(request);
-  response.json(await searchUsers(userId, query, limit));
+  response.json(await searchUsers(userId, query, limit, offset));
 };

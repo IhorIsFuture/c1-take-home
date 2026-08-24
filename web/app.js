@@ -3,6 +3,7 @@ import {
   createConversation,
   createMessage,
   getAccessToken,
+  getConversationParticipants,
   getConversations,
   getCurrentUser,
   getMessages,
@@ -92,6 +93,11 @@ const state = {
   participantController: null,
   participantSearchTimer: null,
   participantUsers: [],
+  participantQuery: '',
+  participantOffset: 0,
+  participantHasMore: false,
+  loadingMoreParticipants: false,
+  activeParticipants: [],
   selectedParticipants: new Map(),
   creatingConversation: false,
   pendingConversation: null,
@@ -207,6 +213,11 @@ function resetApplicationState() {
   clearTimeout(state.participantSearchTimer);
   state.selectedParticipants.clear();
   state.participantUsers = [];
+  state.participantQuery = '';
+  state.participantOffset = 0;
+  state.participantHasMore = false;
+  state.loadingMoreParticipants = false;
+  state.activeParticipants = [];
   state.pendingConversation = null;
   state.pendingRealtimeMessages.clear();
   state.conversationRefreshPromise = null;
@@ -617,6 +628,27 @@ function clearTypingUsers() {
   state.typingUsers.clear();
 }
 
+function participantsStatusText() {
+  const others = state.activeParticipants.filter(participant => participant.id !== state.user?.id);
+
+  if (!others.length) return '';
+
+  const names = others.map(participant => participant.name);
+  if (names.length <= 3) return `With ${names.join(', ')}`;
+  return `With ${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+}
+
+async function loadActiveParticipants(conversationId) {
+  try {
+    const participants = await getConversationParticipants(conversationId);
+    if (state.activeConversationId !== conversationId) return;
+    state.activeParticipants = participants;
+    renderHeader();
+  } catch {
+    state.activeParticipants = [];
+  }
+}
+
 function typingStatusText() {
   const names = [...state.typingUsers.values()].map(typing => typing.name);
 
@@ -681,6 +713,7 @@ function renderHeader() {
   elements.title.textContent = title;
   elements.chatStatus.textContent =
     typingText ||
+    participantsStatusText() ||
     (conversation?.lastMessage
       ? `Last activity ${formatActivity(conversation.lastMessage.createdAt)}`
       : 'No messages yet');
@@ -826,7 +859,9 @@ async function openConversation(id, title, { aroundMessageId } = {}) {
   state.hasMoreMessages = false;
   state.hasNewerMessages = false;
   state.highlightedMessageId = aroundMessageId ?? null;
+  state.activeParticipants = [];
   clearTypingUsers();
+  void loadActiveParticipants(id);
 
   elements.app.classList.add('is-chat-open');
   renderConversations();
@@ -1308,24 +1343,52 @@ function renderParticipantResults() {
   }
 }
 
-async function loadParticipantUsers(query) {
+const participantPageSize = 20;
+
+async function loadParticipantUsers(query, { append = false } = {}) {
   state.participantController?.abort();
   const controller = new AbortController();
   state.participantController = controller;
-  elements.participantStatus.textContent = 'Searching…';
-  elements.participantResults.replaceChildren();
+
+  if (!append) {
+    state.participantQuery = query;
+    state.participantOffset = 0;
+    state.participantHasMore = false;
+    elements.participantStatus.textContent = 'Searching…';
+    elements.participantResults.replaceChildren();
+  }
+
+  state.loadingMoreParticipants = append;
 
   try {
-    const result = await searchUsers(query, controller.signal);
+    const users = await searchUsers(
+      query,
+      { offset: append ? state.participantOffset : 0, limit: participantPageSize },
+      controller.signal
+    );
     if (controller !== state.participantController) return;
-    const users = Array.isArray(result) ? result : (result?.users ?? []);
-    state.participantUsers = users.filter(user => user.id !== state.user?.id);
+
+    const visibleUsers = users.filter(user => user.id !== state.user?.id);
+    state.participantUsers = append ? [...state.participantUsers, ...visibleUsers] : visibleUsers;
+    state.participantOffset = (append ? state.participantOffset : 0) + users.length;
+    state.participantHasMore = users.length === participantPageSize;
     renderParticipantResults();
   } catch (error) {
     if (error.name === 'AbortError') return;
-    state.participantUsers = [];
+    if (!append) state.participantUsers = [];
     elements.participantStatus.textContent =
       error.message ?? 'People could not be loaded. Please try again.';
+  } finally {
+    if (controller === state.participantController) state.loadingMoreParticipants = false;
+  }
+}
+
+function maybeLoadMoreParticipants() {
+  if (!state.participantHasMore || state.loadingMoreParticipants) return;
+
+  const container = elements.participantResults;
+  if (container.scrollHeight - container.scrollTop - container.clientHeight < 60) {
+    void loadParticipantUsers(state.participantQuery, { append: true });
   }
 }
 
@@ -1459,6 +1522,7 @@ elements.newConversationForm.addEventListener('submit', submitConversation);
 elements.conversationTitle.addEventListener('input', () => {
   state.pendingConversation = null;
 });
+elements.participantResults.addEventListener('scroll', maybeLoadMoreParticipants);
 elements.participantSearch.addEventListener('input', () => {
   clearTimeout(state.participantSearchTimer);
   state.participantSearchTimer = setTimeout(
