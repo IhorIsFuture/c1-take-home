@@ -8,7 +8,7 @@ import {
   findParticipantState
 } from '../../support/database/mysql-test-store';
 
-const consolidationMigrationCount = 8;
+const consolidationMigrationCount = 9;
 const legacyPasswordHash = '$2b$12$EmXCbJ4SnQP0Jd4OrjxWoO9bwD5qpYGz.FosBbWcupx7v8clLVUv2';
 
 async function insertLegacyDataset(): Promise<void> {
@@ -65,7 +65,7 @@ describe('stage one migrations', () => {
     await mysqlMigrator.down({ to: 0 });
     const applied = await mysqlMigrator.up();
 
-    expect(applied.length).toBe(17);
+    expect(applied.length).toBe(18);
     expect(await columnType('messages', 'id')).toBe('bigint');
     expect(await columnType('message_bodies', 'message_id')).toBe('bigint');
     expect(await columnType('conversation_participants', 'last_read_message_id')).toBe('bigint');

@@ -653,9 +653,13 @@ function renderSearchResults(query, results) {
     const button = createElement('button', 'search-result');
     button.type = 'button';
     const resultTitle = result.conversationTitle ?? `Conversation #${result.conversationId}`;
+    const meta = result.senderName
+      ? `${result.senderName} · ${formatActivity(result.createdAt)}`
+      : '';
     button.append(
       createElement('strong', '', resultTitle),
-      createElement('span', '', result.body ?? '')
+      createElement('span', '', result.body ?? ''),
+      createElement('span', 'search-result-meta', meta)
     );
     button.addEventListener('click', () => openConversation(result.conversationId, resultTitle));
     container.appendChild(button);
