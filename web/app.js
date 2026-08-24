@@ -804,6 +804,41 @@ function maybeLoadEarlierMessages() {
   if (nearTop || noScrollbar) void loadEarlierMessages();
 }
 
+function prependMessagesToRail(olderMessages) {
+  const container = elements.messages;
+  const rail = container.querySelector('.message-rail');
+
+  if (!rail) {
+    renderMessages({ preserveScroll: true });
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  let currentDate = '';
+
+  for (const message of olderMessages) {
+    const messageDate = formatMessageDate(message.createdAt);
+    if (messageDate && messageDate !== currentDate) {
+      currentDate = messageDate;
+      fragment.appendChild(createElement('div', 'date-divider', messageDate));
+    }
+    fragment.appendChild(createMessageElement(message));
+  }
+
+  const leadingDivider = rail.firstElementChild;
+  if (
+    leadingDivider?.classList.contains('date-divider') &&
+    leadingDivider.textContent === currentDate
+  ) {
+    leadingDivider.remove();
+  }
+
+  const previousHeight = container.scrollHeight;
+  const previousTop = container.scrollTop;
+  rail.prepend(fragment);
+  container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
+}
+
 async function loadEarlierMessages() {
   const conversationId = state.activeConversationId;
   const oldestMessageId = state.messages[0]?.id;
@@ -816,11 +851,13 @@ async function loadEarlierMessages() {
     if (state.activeConversationId !== conversationId) return;
 
     state.hasMoreMessages = messages.length === 30;
-    const merged = new Map(messages.map(message => [message.id, message]));
-    for (const message of state.messages) merged.set(message.id, message);
-    state.messages = [...merged.values()].sort((left, right) => left.id - right.id);
-    for (const message of state.messages) state.seenMessageIds.add(message.id);
-    renderMessages({ preserveScroll: true });
+    const knownIds = new Set(state.messages.map(message => message.id));
+    const olderMessages = messages.filter(message => !knownIds.has(message.id));
+    if (!olderMessages.length) return;
+
+    state.messages = [...olderMessages, ...state.messages];
+    for (const message of olderMessages) state.seenMessageIds.add(message.id);
+    prependMessagesToRail(olderMessages);
   } catch (error) {
     showToast(error.message ?? 'Earlier messages could not be loaded.', 'error');
   } finally {
