@@ -4,9 +4,9 @@ x-perf-app-environment: &perf-app-environment
   NODE_ENV: production
   PORT: '3000'
   MYSQL_URL: mysql://relay_perf:relay_perf@mysql:3306/relay_perf?charset=utf8mb4
-  MONGO_URL: mongodb://mongo:27017/relay_perf
   REDIS_URL: redis://redis:6379/0
   REDIS_NAMESPACE: relay-perf
+  RATE_LIMIT_MESSAGE_CREATE_LIMIT: '100000'
   BCRYPT_COST: '12'
   JWT_ACCESS_SECRET: relay-performance-access-secret-with-at-least-32-characters
   JWT_ISSUER: relay-perf-api
@@ -43,17 +43,6 @@ services:
       retries: 30
       start_period: 30s
 
-  mongo:
-    image: mongo:7.0.40
-    volumes:
-      - mongo_perf_data:/data/db
-    healthcheck:
-      test: ['CMD', 'mongosh', '--quiet', '--eval', 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)']
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 20s
-
   redis:
     image: redis:7.4.11
     volumes:
@@ -82,8 +71,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      mongo:
-        condition: service_healthy
 
   performance-seed:
     <<: *perf-app
@@ -146,7 +133,6 @@ services:
 
 volumes:
   mysql_perf_data:
-  mongo_perf_data:
   redis_perf_data:
 
 configs:

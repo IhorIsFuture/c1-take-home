@@ -2093,3 +2093,10 @@ svg {
     transition-duration: 0.01ms !important;
   }
 }
+
+.search-result-meta {
+  display: block;
+  font-size: 12px;
+  color: var(--text-soft);
+  margin-top: 2px;
+}

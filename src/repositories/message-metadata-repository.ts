@@ -1,45 +1,37 @@
-import type { IncludeOptions } from 'sequelize';
-import { Message, User } from '../models/sql';
+import { Op, type IncludeOptions, type Transaction } from 'sequelize';
+import { Message, MessageBody, User } from '../models/sql';
 
-export interface NewMessageMetadata {
+export interface MessageClientKey {
   conversationId: number;
   senderId: number;
   clientId: string;
+}
+
+export interface NewMessageMetadata extends MessageClientKey {
   bodyHash: string;
   createdAt: Date;
 }
 
-export interface MessageMetadata {
+export interface MessageRecord {
   id: number;
   conversationId: number;
   senderId: number;
   senderName: string;
-  createdAt: Date;
-}
-
-export interface MessageMetadataWriteResult {
-  metadata: MessageMetadata;
-  created: boolean;
   bodyHash: string;
+  createdAt: Date;
+  body: string | null;
 }
 
 export interface MessageMetadataRepository {
-  createOrFind(input: NewMessageMetadata): Promise<MessageMetadataWriteResult>;
-  listByConversationId(conversationId: number): Promise<MessageMetadata[]>;
-}
-
-function toMessageMetadata(message: Message): MessageMetadata {
-  if (!message.sender) {
-    throw new Error(`Sender for message ${message.id} was not loaded`);
-  }
-
-  return {
-    id: message.id,
-    conversationId: message.conversationId,
-    senderId: message.senderId,
-    senderName: message.sender.name,
-    createdAt: message.createdAt
-  };
+  findByClientKey(key: MessageClientKey): Promise<MessageRecord | null>;
+  insertMetadata(input: NewMessageMetadata, transaction: Transaction): Promise<number>;
+  findPage(
+    conversationId: number,
+    beforeId: number | undefined,
+    limit: number
+  ): Promise<MessageRecord[]>;
+  findByIds(ids: readonly number[]): Promise<MessageRecord[]>;
+  messageBelongsToConversation(messageId: number, conversationId: number): Promise<boolean>;
 }
 
 const senderInclude: IncludeOptions = {
@@ -49,42 +41,84 @@ const senderInclude: IncludeOptions = {
   required: true
 };
 
-class SequelizeMessageMetadataRepository implements MessageMetadataRepository {
-  async createOrFind(input: NewMessageMetadata): Promise<MessageMetadataWriteResult> {
-    const [message, created] = await Message.findOrCreate({
-      where: {
-        conversationId: input.conversationId,
-        senderId: input.senderId,
-        clientId: input.clientId
-      },
-      defaults: input
-    });
+const bodyInclude: IncludeOptions = {
+  model: MessageBody,
+  as: 'bodyRow',
+  attributes: ['body'],
+  required: false
+};
 
-    const messageWithSender = await Message.findByPk(message.id, {
-      attributes: ['id', 'conversationId', 'senderId', 'bodyHash', 'createdAt'],
-      include: [senderInclude]
-    });
+const recordAttributes = ['id', 'conversationId', 'senderId', 'bodyHash', 'createdAt'];
 
-    if (!messageWithSender) {
-      throw new Error(`Message ${message.id} was not found after creation`);
-    }
-
-    return {
-      metadata: toMessageMetadata(messageWithSender),
-      created,
-      bodyHash: messageWithSender.bodyHash
-    };
+function toMessageRecord(message: Message): MessageRecord {
+  if (!message.sender) {
+    throw new Error(`Sender for message ${message.id} was not loaded`);
   }
 
-  async listByConversationId(conversationId: number): Promise<MessageMetadata[]> {
-    const messages = await Message.findAll({
-      attributes: ['id', 'conversationId', 'senderId', 'createdAt'],
-      include: [senderInclude],
-      where: { conversationId },
-      order: [['id', 'ASC']]
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    senderId: message.senderId,
+    senderName: message.sender.name,
+    bodyHash: message.bodyHash,
+    createdAt: message.createdAt,
+    body: message.bodyRow ? message.bodyRow.body : null
+  };
+}
+
+class SequelizeMessageMetadataRepository implements MessageMetadataRepository {
+  async findByClientKey(key: MessageClientKey): Promise<MessageRecord | null> {
+    const message = await Message.findOne({
+      attributes: recordAttributes,
+      where: {
+        conversationId: key.conversationId,
+        senderId: key.senderId,
+        clientId: key.clientId
+      },
+      include: [senderInclude, bodyInclude]
     });
 
-    return messages.map(toMessageMetadata);
+    return message ? toMessageRecord(message) : null;
+  }
+
+  async insertMetadata(input: NewMessageMetadata, transaction: Transaction): Promise<number> {
+    const message = await Message.create(input, { transaction });
+    return message.id;
+  }
+
+  async findPage(
+    conversationId: number,
+    beforeId: number | undefined,
+    limit: number
+  ): Promise<MessageRecord[]> {
+    const messages = await Message.findAll({
+      attributes: recordAttributes,
+      where: {
+        conversationId,
+        ...(beforeId === undefined ? {} : { id: { [Op.lt]: beforeId } })
+      },
+      include: [senderInclude, bodyInclude],
+      order: [['id', 'DESC']],
+      limit
+    });
+
+    return messages.map(toMessageRecord);
+  }
+
+  async findByIds(ids: readonly number[]): Promise<MessageRecord[]> {
+    if (!ids.length) return [];
+
+    const messages = await Message.findAll({
+      attributes: recordAttributes,
+      where: { id: { [Op.in]: [...ids] } },
+      include: [senderInclude, bodyInclude]
+    });
+
+    return messages.map(toMessageRecord);
+  }
+
+  async messageBelongsToConversation(messageId: number, conversationId: number): Promise<boolean> {
+    return !!(await Message.count({ where: { id: messageId, conversationId } }));
   }
 }
 

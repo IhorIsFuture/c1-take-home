@@ -1,9 +1,16 @@
 import { Router } from 'express';
-import { createConversationHandler, listConversationsHandler } from '../handlers/conversations';
+import {
+  createConversationHandler,
+  listConversationMessagesHandler,
+  listConversationsHandler,
+  markConversationReadHandler
+} from '../handlers/conversations';
 import { withValidation } from '../middleware/validate-request';
 import {
   createConversationRequestSchema,
-  listConversationsRequestSchema
+  listConversationMessagesRequestSchema,
+  listConversationsRequestSchema,
+  markConversationReadRequestSchema
 } from '../validation/conversations';
 
 export const conversationsRouter = Router();
@@ -15,4 +22,12 @@ conversationsRouter.get(
 conversationsRouter.post(
   '/',
   withValidation(createConversationRequestSchema, createConversationHandler)
+);
+conversationsRouter.get(
+  '/:conversationId/messages',
+  withValidation(listConversationMessagesRequestSchema, listConversationMessagesHandler)
+);
+conversationsRouter.post(
+  '/:conversationId/read',
+  withValidation(markConversationReadRequestSchema, markConversationReadHandler)
 );

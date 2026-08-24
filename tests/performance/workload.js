@@ -150,8 +150,8 @@ export function listConversations(data) {
 export function listMessages(data) {
   const conversationId = selectReadConversationId();
   const response = http.get(
-    `${baseUrl}/api/messages?conversationId=${conversationId}`,
-    requestParameters(data.accessToken, 'message_list', 'GET /api/messages')
+    `${baseUrl}/api/conversations/${conversationId}/messages?limit=100`,
+    requestParameters(data.accessToken, 'message_list', 'GET /api/conversations/:id/messages')
   );
   const payload = validateResponseBodies ? readJson(response) : null;
 
@@ -160,7 +160,7 @@ export function listMessages(data) {
     ...(validateResponseBodies
       ? {
           'message list returns seeded messages': () =>
-            Array.isArray(payload) && payload.length === messagesPerConversation
+            Array.isArray(payload) && payload.length === Math.min(messagesPerConversation, 100)
         }
       : {})
   });

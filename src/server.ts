@@ -4,8 +4,9 @@ import type { Express } from 'express';
 import type { WebSocketServer } from 'ws';
 import { createApp } from './app';
 import { config } from './config';
-import { connectMongo, disconnectMongo, isMongoReady } from './db/mongo';
 import { connectMysql, disconnectMysql, isMysqlReady } from './db/mysql';
+import { OutboxRelay } from './outbox/outbox-relay';
+import { RedisRateLimiter } from './rate-limit/redis-rate-limiter';
 import { RedisRealtimePubSub } from './realtime/index';
 import { verifyAccessToken } from './security/access-token';
 import { attachWs } from './ws/hub';
@@ -130,17 +131,20 @@ async function stopResources(
   server: Server,
   webSocketServer: WebSocketServer,
   realtimePubSub: RedisRealtimePubSub,
-  connections: { mongo: boolean; mysql: boolean; redis: boolean }
+  outboxRelay: OutboxRelay,
+  rateLimiter: RedisRateLimiter,
+  connections: { mysql: boolean; redis: boolean }
 ): Promise<void> {
+  await outboxRelay.stop();
   const transportResults = await Promise.allSettled([
     closeHttpServer(server),
     closeWebSocketServer(webSocketServer)
   ]);
   const realtimeResults = await Promise.allSettled([
-    ...(connections.redis ? [realtimePubSub.close()] : [])
+    ...(connections.redis ? [realtimePubSub.close()] : []),
+    rateLimiter.close()
   ]);
   const databaseResults = await Promise.allSettled([
-    ...(connections.mongo ? [disconnectMongo()] : []),
     ...(connections.mysql ? [disconnectMysql()] : [])
   ]);
   const errors = [...transportResults, ...realtimeResults, ...databaseResults]
@@ -153,7 +157,7 @@ async function stopResources(
 export async function startServer(options: StartServerOptions = {}): Promise<RunningServer> {
   let ready = false;
   let dependencyReadinessCheck: Promise<boolean> | undefined;
-  const connections = { mongo: false, mysql: false, redis: false };
+  const connections = { mysql: false, redis: false };
   const server = http.createServer();
   const { webSocketServer, deliver, broadcast } = attachWs(server, { verifyAccessToken });
   const realtimePubSub = new RedisRealtimePubSub({
@@ -162,17 +166,19 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     onSubscriberUnavailable: () => broadcast({ type: 'realtime_unavailable' }),
     onSubscriberRecovered: () => broadcast({ type: 'resync_required' })
   });
+  const outboxRelay = new OutboxRelay(realtimePubSub, config.outbox);
+  const rateLimiter = new RedisRateLimiter({
+    url: config.redisUrl,
+    namespace: config.redisNamespace
+  });
   const app = createApp({
     realtimePublisher: realtimePubSub,
+    rateLimiter,
     checkReadiness: async () => {
       if (!ready) return false;
 
-      dependencyReadinessCheck ??= Promise.all([
-        isMysqlReady(),
-        isMongoReady(),
-        realtimePubSub.isReady()
-      ])
-        .then(([mysqlReady, mongoReady, redisReady]) => mysqlReady && mongoReady && redisReady)
+      dependencyReadinessCheck ??= Promise.all([isMysqlReady(), realtimePubSub.isReady()])
+        .then(([mysqlReady, redisReady]) => mysqlReady && redisReady)
         .finally(() => {
           dependencyReadinessCheck = undefined;
         });
@@ -185,13 +191,14 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   try {
     await connectMysql();
     connections.mysql = true;
-    await connectMongo();
-    connections.mongo = true;
+
+    await rateLimiter.start();
     await realtimePubSub.start(({ recipientUserIds, event }) => {
       if (event.type !== 'message.created') return;
       deliver(recipientUserIds, { type: 'message', ...event.message });
     });
     connections.redis = true;
+    outboxRelay.start();
     const port = await listen(server, options.port ?? config.port);
     ready = true;
     let stopPromise: Promise<void> | undefined;
@@ -203,15 +210,27 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       port,
       stop: () => {
         ready = false;
-        stopPromise ??= stopResources(server, webSocketServer, realtimePubSub, connections);
+        stopPromise ??= stopResources(
+          server,
+          webSocketServer,
+          realtimePubSub,
+          outboxRelay,
+          rateLimiter,
+          connections
+        );
         return stopPromise;
       }
     };
   } catch (error) {
     ready = false;
-    await stopResources(server, webSocketServer, realtimePubSub, connections).catch(
-      () => undefined
-    );
+    await stopResources(
+      server,
+      webSocketServer,
+      realtimePubSub,
+      outboxRelay,
+      rateLimiter,
+      connections
+    ).catch(() => undefined);
     throw error;
   }
 }

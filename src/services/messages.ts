@@ -1,7 +1,20 @@
+import { Transaction, UniqueConstraintError } from 'sequelize';
+import { isDeadlockError } from '../db/errors';
+import { sequelize } from '../db/mysql';
+import { config } from '../config';
 import { HttpError } from '../errors/http-error';
+import { conversationReadStateRepository } from '../repositories/conversation-read-state-repository';
 import { conversationRepository } from '../repositories/conversation-repository';
+import { conversationSummaryRepository } from '../repositories/conversation-summary-repository';
 import { messageBodyRepository } from '../repositories/message-body-repository';
-import { messageMetadataRepository } from '../repositories/message-metadata-repository';
+import {
+  messageMetadataRepository,
+  type MessageRecord
+} from '../repositories/message-metadata-repository';
+import { outboxRepository } from '../repositories/outbox-repository';
+import { userRepository } from '../repositories/user-repository';
+import { RateLimitError } from '../errors/rate-limit-error';
+import type { RateLimiter } from '../rate-limit/redis-rate-limiter';
 import type { RealtimePublisher } from '../realtime/index';
 import { hashMessageBody } from './message-body-hash';
 
@@ -9,6 +22,19 @@ export interface NewMessage {
   conversationId: number;
   body: string;
   clientId: string;
+}
+
+export interface MessageDto {
+  id: number;
+  conversationId: number;
+  senderId: number;
+  senderName: string;
+  body: string;
+  createdAt: Date;
+}
+
+export function messageCreatedEventId(messageId: number): string {
+  return `message.created:${messageId}`;
 }
 
 async function requireConversationAccess(conversationId: number, userId: number): Promise<void> {
@@ -25,76 +51,156 @@ function idempotencyConflict(): HttpError {
   );
 }
 
+function reportMissingBodies(records: readonly MessageRecord[]): void {
+  const missingIds = records.filter(record => record.body === null).map(record => record.id);
+
+  if (missingIds.length) {
+    console.error(`Message bodies are missing in MySQL for ids: ${missingIds.join(', ')}`);
+  }
+}
+
+function toMessageDto(record: MessageRecord): MessageDto {
+  return {
+    id: record.id,
+    conversationId: record.conversationId,
+    senderId: record.senderId,
+    senderName: record.senderName,
+    body: record.body ?? '',
+    createdAt: record.createdAt
+  };
+}
+
 export async function createMessage(
   userId: number,
   input: NewMessage,
-  realtimePublisher: RealtimePublisher
-) {
+  realtimePublisher: RealtimePublisher,
+  rateLimiter: RateLimiter
+): Promise<{ message: MessageDto; created: boolean }> {
   const { conversationId, body, clientId } = input;
+  const decision = await rateLimiter.consume(
+    `message-create:${userId}:${conversationId}`,
+    config.rateLimit.messageCreate
+  );
+
+  if (!decision.allowed) {
+    throw new RateLimitError(
+      'Too many messages in this conversation, slow down',
+      decision.retryAfterSeconds
+    );
+  }
+
   const participantIds = await conversationRepository.listParticipantIds(conversationId);
 
   if (!participantIds.includes(userId)) {
     throw new HttpError(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
   }
 
+  const sender = await userRepository.findPublicById(userId);
+
+  if (!sender) {
+    throw new HttpError(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
+  }
+
   const bodyHash = hashMessageBody(body);
-  const createdAt = new Date();
+  let deadlockRetried = false;
 
-  const {
-    metadata,
-    created,
-    bodyHash: storedBodyHash
-  } = await messageMetadataRepository.createOrFind({
-    conversationId,
-    senderId: userId,
-    clientId,
-    bodyHash,
-    createdAt
-  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const existing = await messageMetadataRepository.findByClientKey({
+      conversationId,
+      senderId: userId,
+      clientId
+    });
 
-  if (storedBodyHash !== bodyHash) {
-    throw idempotencyConflict();
+    if (existing) {
+      if (existing.bodyHash !== bodyHash) throw idempotencyConflict();
+      reportMissingBodies([existing]);
+      return { message: toMessageDto(existing), created: false };
+    }
+
+    let created: { id: number; createdAt: Date };
+
+    try {
+      created = await sequelize.transaction(
+        { isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED },
+        async transaction => {
+          const createdAt = new Date();
+          const id = await messageMetadataRepository.insertMetadata(
+            { conversationId, senderId: userId, clientId, bodyHash, createdAt },
+            transaction
+          );
+
+          await messageBodyRepository.insert({ messageId: id, body }, transaction);
+          await conversationSummaryRepository.advance(
+            { conversationId, messageId: id, senderId: userId, createdAt, body },
+            transaction
+          );
+          await conversationReadStateRepository.incrementUnreadForOthers(
+            conversationId,
+            userId,
+            transaction
+          );
+          await conversationReadStateRepository.advanceCursor(
+            { conversationId, userId, throughMessageId: id },
+            transaction
+          );
+          await outboxRepository.insertPending(
+            {
+              eventId: messageCreatedEventId(id),
+              eventType: 'message.created',
+              messageId: id,
+              conversationId
+            },
+            transaction
+          );
+
+          return { id, createdAt };
+        }
+      );
+    } catch (error) {
+      if (error instanceof UniqueConstraintError) continue;
+
+      if (isDeadlockError(error) && !deadlockRetried) {
+        deadlockRetried = true;
+        attempt -= 1;
+        continue;
+      }
+
+      throw error;
+    }
+
+    const message: MessageDto = {
+      id: created.id,
+      conversationId,
+      senderId: userId,
+      senderName: sender.name,
+      body,
+      createdAt: created.createdAt
+    };
+
+    try {
+      await realtimePublisher.publish({ type: 'message.created', message }, participantIds);
+      await outboxRepository.markPublishedByEventId(messageCreatedEventId(created.id));
+    } catch (error) {
+      console.error(`Failed to publish message.created for message ${created.id}`, error);
+    }
+
+    return { message, created: true };
   }
 
-  const storedBody = await messageBodyRepository.put({
-    _id: metadata.id,
-    conversationId: metadata.conversationId,
-    senderId: metadata.senderId,
-    body,
-    createdAt: metadata.createdAt
-  });
-
-  if (storedBody.body !== body) {
-    throw idempotencyConflict();
-  }
-
-  const message = {
-    id: metadata.id,
-    conversationId: metadata.conversationId,
-    senderId: metadata.senderId,
-    senderName: metadata.senderName,
-    body: storedBody.body,
-    createdAt: metadata.createdAt
-  };
-
-  await realtimePublisher.publish({ type: 'message.created', message }, participantIds);
-
-  return { message, created };
+  throw new Error(`Could not create message for client id ${clientId}`);
 }
 
-export async function listMessages(userId: number, conversationId: number) {
+export async function listConversationMessages(
+  userId: number,
+  conversationId: number,
+  beforeId: number | undefined,
+  limit: number
+): Promise<MessageDto[]> {
   await requireConversationAccess(conversationId, userId);
-  const messages = await messageMetadataRepository.listByConversationId(conversationId);
-  const bodies = await messageBodyRepository.findByIds(messages.map(message => message.id));
-  const bodyById = new Map(bodies.map(body => [body._id, body]));
 
-  return messages.map(message => {
-    const body = bodyById.get(message.id);
-    const belongsToMessage =
-      body?.conversationId === message.conversationId &&
-      body.senderId === message.senderId &&
-      body.createdAt.getTime() === message.createdAt.getTime();
+  const records = await messageMetadataRepository.findPage(conversationId, beforeId, limit);
 
-    return { ...message, body: belongsToMessage ? body.body : '' };
-  });
+  reportMissingBodies(records);
+
+  return records.map(toMessageDto).reverse();
 }

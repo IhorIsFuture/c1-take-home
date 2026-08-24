@@ -13,6 +13,8 @@ export interface CreatedConversation {
 export interface LastMessage {
   id: number;
   senderId: number;
+  senderName: string;
+  preview: string | null;
   createdAt: string;
 }
 
@@ -20,5 +22,11 @@ export interface ConversationSummary {
   id: number;
   title: string;
   lastMessage: LastMessage | null;
-  messageCount: number;
+  unreadCount: number;
+}
+
+export interface ConversationReadState {
+  conversationId: number;
+  lastReadMessageId: number | null;
+  unreadCount: number;
 }

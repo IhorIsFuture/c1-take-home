@@ -70,30 +70,34 @@ describe('GET /api/conversations', () => {
     );
 
     expect(firstActorList.status).toBe(200);
-    expect(firstActorList.body).toEqual([
+    expect(firstActorList.body).toHaveLength(2);
+    expect(firstActorList.body).toContainEqual({
+      id: firstConversation.body.id,
+      title: 'First shared room',
+      lastMessage: null,
+      unreadCount: 0
+    });
+    expect(firstActorList.body).toContainEqual({
+      id: secondConversation.body.id,
+      title: 'Second shared room',
+      lastMessage: null,
+      unreadCount: 0
+    });
+    expect(secondUserList.body).toEqual([
       {
         id: firstConversation.body.id,
         title: 'First shared room',
         lastMessage: null,
-        messageCount: 0
-      },
-      {
-        id: secondConversation.body.id,
-        title: 'Second shared room',
-        lastMessage: null,
-        messageCount: 0
+        unreadCount: 0
       }
     ]);
-    expect(secondUserList.body).toEqual([firstActorList.body[0]]);
-    expect(thirdUserList.body).toEqual([
-      firstActorList.body[1],
-      {
-        id: outsiderConversation.body.id,
-        title: 'Outsider room',
-        lastMessage: null,
-        messageCount: 0
-      }
-    ]);
+    expect(thirdUserList.body).toHaveLength(2);
+    expect(thirdUserList.body).toContainEqual({
+      id: outsiderConversation.body.id,
+      title: 'Outsider room',
+      lastMessage: null,
+      unreadCount: 0
+    });
     expect(firstActorList.body).not.toContainEqual(
       expect.objectContaining({ id: outsiderConversation.body.id })
     );

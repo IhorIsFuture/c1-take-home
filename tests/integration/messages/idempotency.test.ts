@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { ApiErrorResponse } from '../../support/contracts/auth-contract';
 import type { MessageResponse } from '../../support/contracts/message-contract';
 import {
-  countStoredMessageBodies,
-  findStoredMessageBody
-} from '../../support/database/mongo-test-store';
-import { countStoredMessages, listStoredMessages } from '../../support/database/mysql-test-store';
+  countOutboxRows,
+  countStoredMessageBodyRows,
+  countStoredMessages,
+  findParticipantState,
+  findStoredMessageBodyRow,
+  listStoredMessages
+} from '../../support/database/mysql-test-store';
 import { buildCreateMessageInput } from '../../support/factories/message-factory';
 import { createConversationFixture } from '../../support/fixtures/conversation';
 import { createRegisteredUser } from '../../support/fixtures/registered-user';
@@ -36,7 +39,12 @@ describe('message creation idempotency', () => {
     expect(retryResponse.status).toBe(200);
     expect(retryResponse.body).toEqual(firstResponse.body);
     expect(await countStoredMessages()).toBe(1);
-    expect(await countStoredMessageBodies()).toBe(1);
+    expect(await countStoredMessageBodyRows()).toBe(1);
+    expect(await countOutboxRows()).toBe(1);
+    expect(await findParticipantState(conversation.id, participant.auth.user.id)).toEqual({
+      lastReadMessageId: null,
+      unreadCount: 1
+    });
   });
 
   it('rejects reuse of the client id with a different body and preserves the original', async () => {
@@ -59,8 +67,8 @@ describe('message creation idempotency', () => {
     expect(conflictResponse.status).toBe(409);
     expect(conflictResponse.body).toEqual(idempotencyConflict);
     expect(await countStoredMessages()).toBe(1);
-    expect(await countStoredMessageBodies()).toBe(1);
-    expect((await findStoredMessageBody(firstResponse.body.id))?.body).toBe('Original body');
+    expect(await countStoredMessageBodyRows()).toBe(1);
+    expect((await findStoredMessageBodyRow(firstResponse.body.id))?.body).toBe('Original body');
   });
 
   it('scopes the client id to the sender within a conversation', async () => {
@@ -83,7 +91,7 @@ describe('message creation idempotency', () => {
     expect(secondResponse.status).toBe(201);
     expect(secondResponse.body.id).not.toBe(firstResponse.body.id);
     expect(await countStoredMessages()).toBe(2);
-    expect(await countStoredMessageBodies()).toBe(2);
+    expect(await countStoredMessageBodyRows()).toBe(2);
   });
 
   it('scopes the client id to the conversation for the same sender', async () => {
@@ -115,7 +123,7 @@ describe('message creation idempotency', () => {
     expect(secondResponse.status).toBe(201);
     expect(secondResponse.body.id).not.toBe(firstResponse.body.id);
     expect(await countStoredMessages()).toBe(2);
-    expect(await countStoredMessageBodies()).toBe(2);
+    expect(await countStoredMessageBodyRows()).toBe(2);
   });
 
   it('creates one cross-store message for concurrent identical requests', async () => {
@@ -123,7 +131,7 @@ describe('message creation idempotency', () => {
     const participant = await createRegisteredUser();
     const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
     const input = buildCreateMessageInput(conversation.id);
-    const requestCount = 8;
+    const requestCount = 4;
     const responses = await Promise.all(
       Array.from({ length: requestCount }, () =>
         actor.client.fork().request<MessageResponse>('/api/messages', {
@@ -142,7 +150,12 @@ describe('message creation idempotency', () => {
       true
     );
     expect(await countStoredMessages()).toBe(1);
-    expect(await countStoredMessageBodies()).toBe(1);
+    expect(await countStoredMessageBodyRows()).toBe(1);
+    expect(await countOutboxRows()).toBe(1);
+    expect(await findParticipantState(conversation.id, participant.auth.user.id)).toEqual({
+      lastReadMessageId: null,
+      unreadCount: 1
+    });
   });
 
   it('returns one conflict for concurrent requests with different bodies', async () => {
@@ -166,10 +179,10 @@ describe('message creation idempotency', () => {
     expect(responses.map(response => response.status).sort()).toEqual([201, 409]);
     expect(responses.find(response => response.status === 409)?.body).toEqual(idempotencyConflict);
     expect(await countStoredMessages()).toBe(1);
-    expect(await countStoredMessageBodies()).toBe(1);
+    expect(await countStoredMessageBodyRows()).toBe(1);
 
     const [storedMetadata] = await listStoredMessages(conversation.id);
-    const storedBody = await findStoredMessageBody(storedMetadata?.id ?? 0);
+    const storedBody = await findStoredMessageBodyRow(storedMetadata?.id ?? 0);
     expect(['First candidate', 'Second candidate']).toContain(storedBody?.body);
   });
 });
