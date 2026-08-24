@@ -117,6 +117,10 @@ export class TestWebSocketClient {
     });
   }
 
+  send(payload: unknown): void {
+    this.socket.send(JSON.stringify(payload));
+  }
+
   async close(): Promise<void> {
     if (this.socket.readyState === WebSocket.CLOSED) return;
 

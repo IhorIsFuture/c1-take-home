@@ -1,12 +1,13 @@
 import type { Server } from 'node:http';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
-import { authenticateFrameSchema } from './protocol';
+import { authenticateFrameSchema, typingFrameSchema } from './protocol';
 
 const defaultAuthTimeoutMs = 5000;
 const defaultHeartbeatIntervalMs = 30000;
 const defaultMaxPayloadBytes = 16 * 1024;
 const defaultMaxBufferedAmountBytes = 1024 * 1024;
 const defaultMaxPendingFrames = 32;
+const typingThrottleMs = 1000;
 const maxTimerDelayMs = 2147483647;
 
 export interface WsAuthenticatedUser {
@@ -16,6 +17,7 @@ export interface WsAuthenticatedUser {
 
 export interface WsHubOptions {
   verifyAccessToken: (accessToken: string) => Promise<WsAuthenticatedUser | null>;
+  onTyping?: (userId: number, conversationId: number) => Promise<void>;
   authTimeoutMs?: number;
   heartbeatIntervalMs?: number;
   maxPayloadBytes?: number;
@@ -34,6 +36,7 @@ type Client = WebSocket & {
   userId?: number;
   authenticated: boolean;
   isAlive: boolean;
+  lastTypingSentAt: Map<number, number>;
   authTimer?: ReturnType<typeof setTimeout>;
   accessTokenExpirationTimer?: ReturnType<typeof setTimeout>;
   messageQueue: Promise<void>;
@@ -158,11 +161,41 @@ async function authenticateClient(
   return authenticatedUser;
 }
 
+async function handleAuthenticatedFrame(
+  client: Client,
+  frame: unknown,
+  onTyping: WsHubOptions['onTyping']
+): Promise<void> {
+  const typingFrame = typingFrameSchema.safeParse(frame);
+
+  if (!typingFrame.success) {
+    closeWithError(client, 'protocol_error', 'UNEXPECTED_FRAME', 'Unexpected frame', 1008);
+    return;
+  }
+
+  if (!client.userId || !onTyping) return;
+
+  const conversationId = typingFrame.data.conversationId;
+  const lastSentAt = client.lastTypingSentAt.get(conversationId) ?? 0;
+  const now = Date.now();
+
+  if (now - lastSentAt < typingThrottleMs) return;
+
+  client.lastTypingSentAt.set(conversationId, now);
+
+  try {
+    await onTyping(client.userId, conversationId);
+  } catch (error) {
+    client.reportError(error);
+  }
+}
+
 async function handleFrame(
   client: Client,
   raw: RawData,
   isBinary: boolean,
   verifyAccessToken: WsHubOptions['verifyAccessToken'],
+  onTyping: WsHubOptions['onTyping'],
   registerAuthenticatedClient: (client: Client, userId: number) => void
 ): Promise<void> {
   if (isBinary) {
@@ -180,7 +213,7 @@ async function handleFrame(
   }
 
   if (client.authenticated) {
-    closeWithError(client, 'protocol_error', 'UNEXPECTED_FRAME', 'Unexpected frame', 1008);
+    await handleAuthenticatedFrame(client, frame, onTyping);
     return;
   }
 
@@ -197,6 +230,7 @@ async function handleFrame(
 
 export function attachWs(server: Server, options: WsHubOptions): WsHub {
   const verifyAccessToken = options.verifyAccessToken;
+  const onTyping = options.onTyping;
   const authTimeoutMs = options.authTimeoutMs ?? defaultAuthTimeoutMs;
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? defaultHeartbeatIntervalMs;
   const maxPayloadBytes = options.maxPayloadBytes ?? defaultMaxPayloadBytes;
@@ -233,6 +267,7 @@ export function attachWs(server: Server, options: WsHubOptions): WsHub {
     const client = socket as Client;
     client.authenticated = false;
     client.isAlive = true;
+    client.lastTypingSentAt = new Map();
     client.messageQueue = Promise.resolve();
     client.pendingFrames = 0;
     client.maxBufferedAmountBytes = maxBufferedAmountBytes;
@@ -266,7 +301,14 @@ export function attachWs(server: Server, options: WsHubOptions): WsHub {
       client.messageQueue = client.messageQueue
         .then(async () => {
           if (client.readyState !== WebSocket.OPEN) return;
-          await handleFrame(client, raw, isBinary, verifyAccessToken, registerAuthenticatedClient);
+          await handleFrame(
+            client,
+            raw,
+            isBinary,
+            verifyAccessToken,
+            onTyping,
+            registerAuthenticatedClient
+          );
         })
         .catch(error => {
           reportError(error);
