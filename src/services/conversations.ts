@@ -88,6 +88,14 @@ export async function createConversation(
   };
 }
 
+export async function listConversationParticipants(userId: number, conversationId: number) {
+  if (!(await conversationRepository.hasParticipant(conversationId, userId))) {
+    throw new HttpError(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
+  }
+
+  return conversationRepository.listParticipants(conversationId);
+}
+
 export async function markConversationRead(
   userId: number,
   conversationId: number,

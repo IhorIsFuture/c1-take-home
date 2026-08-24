@@ -103,6 +103,42 @@ describe('GET /api/users', () => {
     );
   });
 
+  it('pages through the directory with limit and offset without gaps', async () => {
+    const actor = await createRegisteredUser(buildRegisterUserInput({ name: 'Directory Actor' }));
+
+    for (let index = 0; index < 7; index += 1) {
+      await createRegisteredUser(
+        buildRegisterUserInput({ name: `Directory Member ${String(index + 1).padStart(2, '0')}` })
+      );
+    }
+
+    const firstPage = await actor.client.request<PublicUser[]>(
+      '/api/users?query=Directory+Member&limit=3&offset=0',
+      { accessToken: actor.auth.accessToken }
+    );
+    const secondPage = await actor.client.request<PublicUser[]>(
+      '/api/users?query=Directory+Member&limit=3&offset=3',
+      { accessToken: actor.auth.accessToken }
+    );
+    const thirdPage = await actor.client.request<PublicUser[]>(
+      '/api/users?query=Directory+Member&limit=3&offset=6',
+      { accessToken: actor.auth.accessToken }
+    );
+
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.map(user => user.name)).toEqual([
+      'Directory Member 01',
+      'Directory Member 02',
+      'Directory Member 03'
+    ]);
+    expect(secondPage.body.map(user => user.name)).toEqual([
+      'Directory Member 04',
+      'Directory Member 05',
+      'Directory Member 06'
+    ]);
+    expect(thirdPage.body.map(user => user.name)).toEqual(['Directory Member 07']);
+  });
+
   it('requires authentication', async () => {
     const response = await new TestHttpClient().request<ApiErrorResponse>('/api/users');
 

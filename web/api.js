@@ -139,9 +139,15 @@ export function getCurrentUser(signal) {
   return request('/api/users/me', { signal });
 }
 
-export function searchUsers(query, signal) {
-  const search = new URLSearchParams({ query, limit: '20' });
+export function searchUsers(query, { offset = 0, limit = 20 } = {}, signal) {
+  const search = new URLSearchParams({ query, limit: String(limit), offset: String(offset) });
   return request(`/api/users?${search}`, { signal });
+}
+
+export function getConversationParticipants(conversationId, signal) {
+  return request(`/api/conversations/${encodeURIComponent(conversationId)}/participants`, {
+    signal
+  });
 }
 
 export function getConversations(signal) {

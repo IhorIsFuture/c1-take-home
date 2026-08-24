@@ -2,6 +2,7 @@ import type { ValidatedHandler } from '../middleware/validate-request';
 import { requireAuth } from '../middleware/authenticate';
 import {
   createConversation,
+  listConversationParticipants,
   listConversations,
   markConversationRead
 } from '../services/conversations';
@@ -10,6 +11,7 @@ import type { RealtimePublisher } from '../realtime/index';
 import type {
   CreateConversationRequest,
   ListConversationMessagesRequest,
+  ListConversationParticipantsRequest,
   ListConversationsRequest,
   MarkConversationReadRequest
 } from '../validation/conversations';
@@ -56,4 +58,11 @@ export const markConversationReadHandler: ValidatedHandler<MarkConversationReadR
 ) => {
   const { userId } = requireAuth(request);
   response.json(await markConversationRead(userId, conversationId, throughMessageId));
+};
+
+export const listConversationParticipantsHandler: ValidatedHandler<
+  ListConversationParticipantsRequest
+> = async ({ params: { conversationId } }, { request, response }) => {
+  const { userId } = requireAuth(request);
+  response.json(await listConversationParticipants(userId, conversationId));
 };

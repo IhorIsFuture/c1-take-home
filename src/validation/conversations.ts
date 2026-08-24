@@ -39,6 +39,16 @@ export type ListConversationMessagesRequest = z.output<
   typeof listConversationMessagesRequestSchema
 >;
 
+export const listConversationParticipantsRequestSchema = z.object({
+  params: z.object({
+    conversationId: positiveIntegerSchema
+  })
+});
+
+export type ListConversationParticipantsRequest = z.output<
+  typeof listConversationParticipantsRequestSchema
+>;
+
 export const markConversationReadRequestSchema = z.object({
   params: z.object({
     conversationId: positiveIntegerSchema

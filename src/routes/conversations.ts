@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   createConversationHandler,
   listConversationMessagesHandler,
+  listConversationParticipantsHandler,
   listConversationsHandler,
   markConversationReadHandler
 } from '../handlers/conversations';
@@ -10,6 +11,7 @@ import type { RealtimePublisher } from '../realtime/index';
 import {
   createConversationRequestSchema,
   listConversationMessagesRequestSchema,
+  listConversationParticipantsRequestSchema,
   listConversationsRequestSchema,
   markConversationReadRequestSchema
 } from '../validation/conversations';
@@ -32,6 +34,10 @@ export function createConversationsRouter(realtimePublisher: RealtimePublisher):
   conversationsRouter.post(
     '/:conversationId/read',
     withValidation(markConversationReadRequestSchema, markConversationReadHandler)
+  );
+  conversationsRouter.get(
+    '/:conversationId/participants',
+    withValidation(listConversationParticipantsRequestSchema, listConversationParticipantsHandler)
   );
 
   return conversationsRouter;

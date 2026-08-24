@@ -34,10 +34,17 @@ export interface ConversationWriteResult {
   created: boolean;
 }
 
+export interface ConversationParticipantDto {
+  id: number;
+  name: string;
+  email: string;
+}
+
 export interface ConversationRepository {
   listByUserId(userId: number): Promise<ConversationDto[]>;
   createOrFind(input: NewConversation): Promise<ConversationWriteResult>;
   listParticipantIds(conversationId: number): Promise<number[]>;
+  listParticipants(conversationId: number): Promise<ConversationParticipantDto[]>;
   listParticipantIdsByConversationIds(
     conversationIds: readonly number[]
   ): Promise<Map<number, number[]>>;
@@ -189,6 +196,17 @@ class SequelizeConversationRepository implements ConversationRepository {
 
   async hasParticipant(conversationId: number, userId: number): Promise<boolean> {
     return !!(await ConversationParticipant.count({ where: { conversationId, userId } }));
+  }
+
+  async listParticipants(conversationId: number): Promise<ConversationParticipantDto[]> {
+    return sequelize.query<ConversationParticipantDto>(
+      `SELECT u.id, u.name, u.email
+      FROM conversation_participants p
+      JOIN users u ON u.id = p.user_id
+      WHERE p.conversation_id = :conversationId
+      ORDER BY u.name, u.id`,
+      { replacements: { conversationId }, type: QueryTypes.SELECT }
+    );
   }
 
   async listParticipantIds(conversationId: number): Promise<number[]> {
