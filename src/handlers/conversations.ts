@@ -1,0 +1,68 @@
+import type { ValidatedHandler } from '../middleware/validate-request';
+import { requireAuth } from '../middleware/authenticate';
+import {
+  createConversation,
+  listConversationParticipants,
+  listConversations,
+  markConversationRead
+} from '../services/conversations';
+import { listConversationMessages } from '../services/messages';
+import type { RealtimePublisher } from '../realtime/index';
+import type {
+  CreateConversationRequest,
+  ListConversationMessagesRequest,
+  ListConversationParticipantsRequest,
+  ListConversationsRequest,
+  MarkConversationReadRequest
+} from '../validation/conversations';
+
+export const listConversationsHandler: ValidatedHandler<ListConversationsRequest> = async (
+  _input,
+  { request, response }
+) => {
+  const { userId } = requireAuth(request);
+  response.json(await listConversations(userId));
+};
+
+export function createConversationHandler(
+  realtimePublisher: RealtimePublisher
+): ValidatedHandler<CreateConversationRequest> {
+  return async ({ body: { title, participantIds, clientId } }, { request, response }) => {
+    const { userId } = requireAuth(request);
+    const result = await createConversation(
+      userId,
+      title,
+      participantIds,
+      clientId,
+      realtimePublisher
+    );
+    response.status(result.created ? 201 : 200).json(result.conversation);
+  };
+}
+
+export const listConversationMessagesHandler: ValidatedHandler<
+  ListConversationMessagesRequest
+> = async (
+  { params: { conversationId }, query: { beforeId, afterId, limit } },
+  { request, response }
+) => {
+  const { userId } = requireAuth(request);
+  response.json(
+    await listConversationMessages(userId, conversationId, { beforeId, afterId }, limit)
+  );
+};
+
+export const markConversationReadHandler: ValidatedHandler<MarkConversationReadRequest> = async (
+  { params: { conversationId }, body: { throughMessageId } },
+  { request, response }
+) => {
+  const { userId } = requireAuth(request);
+  response.json(await markConversationRead(userId, conversationId, throughMessageId));
+};
+
+export const listConversationParticipantsHandler: ValidatedHandler<
+  ListConversationParticipantsRequest
+> = async ({ params: { conversationId } }, { request, response }) => {
+  const { userId } = requireAuth(request);
+  response.json(await listConversationParticipants(userId, conversationId));
+};

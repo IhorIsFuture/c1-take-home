@@ -3,12 +3,12 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "allowJs": true,
-    "checkJs": false,
     "strict": true,
     "esModuleInterop": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "docker/db"]
+  "include": ["src", "docker/db", "tests", "vitest.integration.config.ts"]
 }

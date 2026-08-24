@@ -1,26 +1,24 @@
-import http from 'node:http';
-import express from 'express';
-import { config } from './config.ts';
-import { waitForMysql } from './db/mysql.ts';
-import { connectMongo } from './db/mongo.ts';
-import { conversationsRouter } from './routes/conversations.js';
-import { messagesRouter } from './routes/messages.js';
-import { searchRouter } from './routes/search.js';
-import { attachWs } from './ws/hub.ts';
+import { startServer } from './server';
 
-const app = express();
-app.use(express.json());
-app.use(express.static('web'));
-app.use('/api/conversations', conversationsRouter);
-app.use('/api/messages', messagesRouter);
-app.use('/api/search', searchRouter);
+const server = await startServer();
 
-const server = http.createServer(app);
-attachWs(server);
+console.log(`relay listening on :${server.port}`);
 
-await waitForMysql();
-await connectMongo();
+let shuttingDown = false;
 
-server.listen(config.port, () => {
-  console.log(`relay listening on :${config.port}`);
-});
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`relay received ${signal}, shutting down`);
+
+  try {
+    await server.stop();
+    console.log('relay stopped');
+  } catch (error) {
+    console.error('Failed to stop relay', error);
+    process.exitCode = 1;
+  }
+}
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));

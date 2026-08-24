@@ -1,0 +1,127 @@
+name: c1-take-home-dev
+
+x-app: &app
+  image: c1-take-home-app:dev
+  build:
+    context: .
+    dockerfile: docker/app/Dockerfile
+  env_file:
+    - .env
+  init: true
+
+services:
+  mysql:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: relay
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-proot']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 2)']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  migrate:
+    <<: *app
+    command: ['npm', 'run', 'db:migrate']
+    restart: 'no'
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  seed:
+    <<: *app
+    command: ['npm', 'run', 'db:seed']
+    restart: 'no'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ['node', '--import', 'tsx', 'src/index.ts']
+    restart: unless-stopped
+    stop_grace_period: 15s
+    expose:
+      - '3000'
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/ready').then(response => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  envoy:
+    image: envoyproxy/envoy:v1.31-latest
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./docker/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    depends_on:
+      api:
+        condition: service_healthy
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      envoy:
+        condition: service_started
+
+volumes:
+  mysql_data:
+  mongo_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

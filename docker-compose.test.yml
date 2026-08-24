@@ -1,0 +1,111 @@
+name: relay-test
+
+x-test-app-environment: &test-app-environment
+  NODE_ENV: test
+  TEST_ENV_GUARD: relay-test
+  PORT: '3000'
+  MYSQL_URL: mysql://relay_test:relay_test@mysql:3306/relay_test?charset=utf8mb4
+  REDIS_URL: redis://redis:6379/15
+  REDIS_NAMESPACE: relay-test
+  BCRYPT_COST: '10'
+  JWT_ACCESS_SECRET: relay-test-access-secret-with-at-least-32-characters
+  JWT_ISSUER: relay-test-api
+  JWT_AUDIENCE: relay-test-client
+  JWT_ACCESS_TTL_SECONDS: '300'
+  REFRESH_TOKEN_TTL_SECONDS: '3600'
+  DEMO_USER_PASSWORD: RelayTest123!
+  OUTBOX_RELAY_POLL_INTERVAL_MS: '250'
+  OUTBOX_RELAY_BACKOFF_BASE_SECONDS: '1'
+
+x-test-app: &test-app
+  image: relay-test-api:local
+  environment: *test-app-environment
+  init: true
+  stop_grace_period: 15s
+
+services:
+  mysql:
+    image: mysql:8.4.11
+    environment:
+      MYSQL_DATABASE: relay_test
+      MYSQL_USER: relay_test
+      MYSQL_PASSWORD: relay_test
+      MYSQL_ROOT_PASSWORD: relay_test_root
+    volumes:
+      - mysql_test_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-prelay_test_root']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  redis:
+    image: redis:7.4.11
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *test-app
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    command: ['npm', 'run', 'db:migrate']
+    restart: 'no'
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  seed:
+    <<: *test-app
+    command: ['npm', 'run', 'db:seed']
+    restart: 'no'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    <<: *test-app
+    command: ['node', '--import', 'tsx', 'src/index.ts']
+    restart: 'no'
+    expose: ['3000']
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  envoy:
+    image: envoyproxy/envoy:v1.31.10
+    expose: ['3000']
+    configs:
+      - source: relay_test_envoy
+        target: /etc/envoy/envoy.yaml
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  mysql_test_data:
+  redis_test_data:
+
+configs:
+  relay_test_envoy:
+    file: ./docker/envoy/envoy.yaml
