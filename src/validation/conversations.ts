@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { positiveIntegerSchema, requiredStringSchema } from './common';
+import { positiveBigIntegerSchema, positiveIntegerSchema, requiredStringSchema } from './common';
 
 export const listConversationsRequestSchema = z.object({});
 
@@ -18,3 +18,28 @@ export const createConversationRequestSchema = z.object({
 });
 
 export type CreateConversationRequest = z.output<typeof createConversationRequestSchema>;
+
+export const listConversationMessagesRequestSchema = z.object({
+  params: z.object({
+    conversationId: positiveIntegerSchema
+  }),
+  query: z.object({
+    beforeId: positiveBigIntegerSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(30)
+  })
+});
+
+export type ListConversationMessagesRequest = z.output<
+  typeof listConversationMessagesRequestSchema
+>;
+
+export const markConversationReadRequestSchema = z.object({
+  params: z.object({
+    conversationId: positiveIntegerSchema
+  }),
+  body: z.object({
+    throughMessageId: positiveBigIntegerSchema
+  })
+});
+
+export type MarkConversationReadRequest = z.output<typeof markConversationReadRequestSchema>;

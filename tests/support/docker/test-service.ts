@@ -26,3 +26,21 @@ export async function startRedisTestService(): Promise<void> {
     cwd: projectDirectory
   });
 }
+
+export async function stopMongoTestService(): Promise<void> {
+  await execFileAsync('docker', [...composeArguments, 'stop', 'mongo'], {
+    cwd: projectDirectory
+  });
+}
+
+export async function startMongoTestService(): Promise<void> {
+  await execFileAsync('docker', [...composeArguments, 'start', 'mongo'], {
+    cwd: projectDirectory
+  });
+}
+
+export async function restartApiTestServices(): Promise<void> {
+  await execFileAsync('docker', [...composeArguments, 'restart', 'api'], {
+    cwd: projectDirectory
+  });
+}

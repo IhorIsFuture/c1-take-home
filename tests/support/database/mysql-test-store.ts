@@ -3,7 +3,11 @@ import { testEnvironment } from '../test-environment';
 
 const applicationTables = [
   'auth_sessions',
+  'message_outbox',
+  'message_bodies',
+  'message_body_backfill_mismatches',
   'messages',
+  'conversation_summaries',
   'conversation_participants',
   'conversations',
   'users'
@@ -101,6 +105,10 @@ export async function resetMysqlTestData(): Promise<void> {
       for (const table of applicationTables) {
         await connection.query('TRUNCATE TABLE ' + table);
       }
+
+      await connection.query(
+        'UPDATE message_body_backfill_state SET last_document_id = 0, copied_count = 0 WHERE id = 1'
+      );
     } finally {
       await connection.query('SET FOREIGN_KEY_CHECKS = 1');
     }
@@ -192,6 +200,232 @@ export async function countStoredMessages(): Promise<number> {
   );
 
   return rows[0]?.count ?? 0;
+}
+
+export interface StoredMessageBodyRow {
+  messageId: number;
+  body: string;
+}
+
+export interface StoredOutboxRow {
+  id: number;
+  eventId: string;
+  eventType: string;
+  messageId: number;
+  conversationId: number;
+  status: 'pending' | 'published' | 'failed';
+  attempts: number;
+  availableAt: Date;
+  publishedAt: Date | null;
+  mirroredAt: Date | null;
+  createdAt: Date;
+}
+
+export interface StoredConversationSummary {
+  conversationId: number;
+  lastMessageId: number | null;
+  lastMessageAt: Date | null;
+  lastSenderId: number | null;
+  lastMessagePreview: string | null;
+}
+
+export interface StoredParticipantState {
+  lastReadMessageId: number | null;
+  unreadCount: number;
+}
+
+interface MessageBodyRowPacket extends RowDataPacket {
+  messageId: number;
+  body: string;
+}
+
+interface OutboxRowPacket extends RowDataPacket {
+  id: number;
+  eventId: string;
+  eventType: string;
+  messageId: number;
+  conversationId: number;
+  status: 'pending' | 'published' | 'failed';
+  attempts: number;
+  availableAt: Date;
+  publishedAt: Date | null;
+  mirroredAt: Date | null;
+  createdAt: Date;
+}
+
+interface ConversationSummaryPacket extends RowDataPacket {
+  conversationId: number;
+  lastMessageId: number | null;
+  lastMessageAt: Date | null;
+  lastSenderId: number | null;
+  lastMessagePreview: string | null;
+}
+
+interface ParticipantStatePacket extends RowDataPacket {
+  lastReadMessageId: number | null;
+  unreadCount: number;
+}
+
+const outboxSelect =
+  'SELECT id, event_id AS eventId, event_type AS eventType, message_id AS messageId, ' +
+  'conversation_id AS conversationId, status, attempts, available_at AS availableAt, ' +
+  'published_at AS publishedAt, mirrored_at AS mirroredAt, created_at AS createdAt ' +
+  'FROM message_outbox';
+
+export async function findStoredMessageBodyRow(
+  messageId: number
+): Promise<StoredMessageBodyRow | null> {
+  const [rows] = await getPool().query<MessageBodyRowPacket[]>(
+    'SELECT message_id AS messageId, body FROM message_bodies WHERE message_id = ? LIMIT 1',
+    [messageId]
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function countStoredMessageBodyRows(): Promise<number> {
+  const [rows] = await getPool().query<(RowDataPacket & { count: number })[]>(
+    'SELECT COUNT(*) AS count FROM message_bodies'
+  );
+
+  return rows[0]?.count ?? 0;
+}
+
+export async function deleteStoredMessageBodyRows(ids: readonly number[]): Promise<void> {
+  if (!ids.length) return;
+  await getPool().query('DELETE FROM message_bodies WHERE message_id IN (?)', [[...ids]]);
+}
+
+export async function listOutboxRows(): Promise<StoredOutboxRow[]> {
+  const [rows] = await getPool().query<OutboxRowPacket[]>(outboxSelect + ' ORDER BY id');
+  return rows;
+}
+
+export async function findOutboxRowByEventId(eventId: string): Promise<StoredOutboxRow | null> {
+  const [rows] = await getPool().query<OutboxRowPacket[]>(
+    outboxSelect + ' WHERE event_id = ? LIMIT 1',
+    [eventId]
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function countOutboxRows(status?: StoredOutboxRow['status']): Promise<number> {
+  const [rows] = status
+    ? await getPool().query<(RowDataPacket & { count: number })[]>(
+        'SELECT COUNT(*) AS count FROM message_outbox WHERE status = ?',
+        [status]
+      )
+    : await getPool().query<(RowDataPacket & { count: number })[]>(
+        'SELECT COUNT(*) AS count FROM message_outbox'
+      );
+
+  return rows[0]?.count ?? 0;
+}
+
+export async function updateOutboxRow(
+  id: number,
+  patch: Partial<Pick<StoredOutboxRow, 'status' | 'attempts'>> & {
+    availableAt?: Date;
+    publishedAt?: Date | null;
+    mirroredAt?: Date | null;
+  }
+): Promise<void> {
+  const assignments: string[] = [];
+  const values: unknown[] = [];
+
+  if (patch.status !== undefined) {
+    assignments.push('status = ?');
+    values.push(patch.status);
+  }
+
+  if (patch.attempts !== undefined) {
+    assignments.push('attempts = ?');
+    values.push(patch.attempts);
+  }
+
+  if (patch.availableAt !== undefined) {
+    assignments.push('available_at = ?');
+    values.push(patch.availableAt);
+  }
+
+  if (patch.publishedAt !== undefined) {
+    assignments.push('published_at = ?');
+    values.push(patch.publishedAt);
+  }
+
+  if (patch.mirroredAt !== undefined) {
+    assignments.push('mirrored_at = ?');
+    values.push(patch.mirroredAt);
+  }
+
+  if (!assignments.length) return;
+
+  values.push(id);
+  await getPool().query(
+    'UPDATE message_outbox SET ' + assignments.join(', ') + ' WHERE id = ?',
+    values
+  );
+}
+
+export async function insertOutboxRow(row: {
+  eventId: string;
+  eventType: string;
+  messageId: number;
+  conversationId: number;
+  status: StoredOutboxRow['status'];
+  attempts?: number;
+  availableAt?: Date;
+  publishedAt?: Date | null;
+  mirroredAt?: Date | null;
+  createdAt?: Date;
+}): Promise<number> {
+  const [result] = await getPool().query(
+    'INSERT INTO message_outbox (event_id, event_type, message_id, conversation_id, status, ' +
+      'attempts, available_at, published_at, mirrored_at, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      row.eventId,
+      row.eventType,
+      row.messageId,
+      row.conversationId,
+      row.status,
+      row.attempts ?? 0,
+      row.availableAt ?? new Date(),
+      row.publishedAt ?? null,
+      row.mirroredAt ?? null,
+      row.createdAt ?? new Date()
+    ]
+  );
+
+  return (result as { insertId: number }).insertId;
+}
+
+export async function findConversationSummary(
+  conversationId: number
+): Promise<StoredConversationSummary | null> {
+  const [rows] = await getPool().query<ConversationSummaryPacket[]>(
+    'SELECT conversation_id AS conversationId, last_message_id AS lastMessageId, ' +
+      'last_message_at AS lastMessageAt, last_sender_id AS lastSenderId, ' +
+      'last_message_preview AS lastMessagePreview ' +
+      'FROM conversation_summaries WHERE conversation_id = ? LIMIT 1',
+    [conversationId]
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function findParticipantState(
+  conversationId: number,
+  userId: number
+): Promise<StoredParticipantState | null> {
+  const [rows] = await getPool().query<ParticipantStatePacket[]>(
+    'SELECT last_read_message_id AS lastReadMessageId, unread_count AS unreadCount ' +
+      'FROM conversation_participants WHERE conversation_id = ? AND user_id = ? LIMIT 1',
+    [conversationId, userId]
+  );
+
+  return rows[0] ?? null;
 }
 
 export async function closeMysqlTestStore(): Promise<void> {

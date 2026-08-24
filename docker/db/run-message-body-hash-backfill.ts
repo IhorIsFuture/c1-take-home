@@ -1,4 +1,4 @@
-import { connectMongo, disconnectMongo } from '../../src/db/mongo';
+import { connectMongo, disconnectMongo } from '../../src/legacy/mongo';
 import { connectMysql, disconnectMysql } from '../../src/db/mysql';
 import { backfillMessageBodyHashes, verifyMessageBodyHashes } from './message-body-hash-backfill';
 

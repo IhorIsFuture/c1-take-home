@@ -1,4 +1,3 @@
-import type { MessageBody } from '../../src/models/message-body';
 import { hashMessageBody } from '../../src/services/message-body-hash';
 
 export const demoUsers = [
@@ -78,10 +77,26 @@ export const demoMessages = demoMessageFixtures.map(({ body, ...message }) => ({
   bodyHash: hashMessageBody(body)
 }));
 
-export const demoMessageBodies: MessageBody[] = demoMessageFixtures.map(
-  ({ id, body, ...message }) => ({
-    _id: id,
-    ...message,
-    body
-  })
+export const demoMessageBodyRows = demoMessageFixtures.map(({ id, body }) => ({
+  messageId: id,
+  body
+}));
+
+const lastMessageByConversationId = new Map(
+  demoMessageFixtures.map(message => [message.conversationId, message])
 );
+
+export const demoConversationSummaries = [...lastMessageByConversationId.values()].map(message => ({
+  conversationId: message.conversationId,
+  lastMessageId: message.id,
+  lastMessageAt: message.createdAt,
+  lastSenderId: message.senderId,
+  lastMessagePreview: message.body.slice(0, 300)
+}));
+
+export const demoParticipantReadState = demoConversationParticipants.map(participant => ({
+  conversationId: participant.conversationId,
+  userId: participant.userId,
+  lastReadMessageId: lastMessageByConversationId.get(participant.conversationId)?.id ?? null,
+  unreadCount: 0
+}));

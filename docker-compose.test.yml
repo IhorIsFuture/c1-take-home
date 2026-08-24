@@ -15,6 +15,9 @@ x-test-app-environment: &test-app-environment
   JWT_ACCESS_TTL_SECONDS: '300'
   REFRESH_TOKEN_TTL_SECONDS: '3600'
   DEMO_USER_PASSWORD: RelayTest123!
+  MESSAGE_BODY_COMPAT: sql-only
+  OUTBOX_RELAY_POLL_INTERVAL_MS: '250'
+  OUTBOX_RELAY_BACKOFF_BASE_SECONDS: '1'
 
 x-test-app: &test-app
   image: relay-test-api:local
@@ -78,8 +81,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      mongo:
-        condition: service_healthy
 
   api:
     <<: *test-app

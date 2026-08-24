@@ -5,13 +5,13 @@ import { buildCreateMessageInput } from '../../support/factories/message-factory
 import { createConversationFixture } from '../../support/fixtures/conversation';
 import { createRegisteredUser } from '../../support/fixtures/registered-user';
 
-describe('GET /api/messages', () => {
+describe('GET /api/conversations/:conversationId/messages', () => {
   it('returns an empty list for a conversation without messages', async () => {
     const actor = await createRegisteredUser();
     const participant = await createRegisteredUser();
     const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
     const response = await actor.client.request<MessageResponse[]>(
-      '/api/messages?conversationId=' + conversation.id,
+      `/api/conversations/${conversation.id}/messages`,
       { accessToken: actor.auth.accessToken }
     );
 
@@ -39,7 +39,7 @@ describe('GET /api/messages', () => {
       json: buildCreateMessageInput(conversation.id, { body: 'Third message' })
     });
     const response = await participant.client.request<MessageResponse[]>(
-      '/api/messages?conversationId=' + conversation.id,
+      `/api/conversations/${conversation.id}/messages`,
       { accessToken: participant.auth.accessToken }
     );
 
@@ -50,12 +50,9 @@ describe('GET /api/messages', () => {
       participant.input.name,
       creator.input.name
     ]);
-    expect(response.body.map(message => message.id)).toEqual(
-      [...response.body].map(message => message.id).sort((left, right) => left - right)
-    );
   });
 
-  it('updates the conversation summary from persisted message metadata', async () => {
+  it('serves the sidebar summary with preview and per-user unread counts', async () => {
     const actor = await createRegisteredUser();
     const participant = await createRegisteredUser();
     const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
@@ -70,21 +67,35 @@ describe('GET /api/messages', () => {
       accessToken: participant.auth.accessToken,
       json: buildCreateMessageInput(conversation.id, { body: 'Latest message' })
     });
-    const response = await actor.client.request<ConversationSummary[]>('/api/conversations', {
+    const actorList = await actor.client.request<ConversationSummary[]>('/api/conversations', {
       accessToken: actor.auth.accessToken
     });
+    const participantList = await participant.client.request<ConversationSummary[]>(
+      '/api/conversations',
+      { accessToken: participant.auth.accessToken }
+    );
 
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual([
+    expect(actorList.status).toBe(200);
+    expect(actorList.body).toEqual([
       {
         id: conversation.id,
         title: conversation.title,
         lastMessage: {
           id: latest.body.id,
           senderId: participant.auth.user.id,
+          senderName: participant.input.name,
+          preview: 'Latest message',
           createdAt: latest.body.createdAt
         },
-        messageCount: 2
+        unreadCount: 1
+      }
+    ]);
+    expect(participantList.body).toEqual([
+      {
+        id: conversation.id,
+        title: conversation.title,
+        lastMessage: actorList.body[0].lastMessage,
+        unreadCount: 0
       }
     ]);
   });

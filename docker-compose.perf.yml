@@ -5,6 +5,7 @@ x-perf-app-environment: &perf-app-environment
   PORT: '3000'
   MYSQL_URL: mysql://relay_perf:relay_perf@mysql:3306/relay_perf?charset=utf8mb4
   MONGO_URL: mongodb://mongo:27017/relay_perf
+  MESSAGE_BODY_COMPAT: sql-only
   REDIS_URL: redis://redis:6379/0
   REDIS_NAMESPACE: relay-perf
   BCRYPT_COST: '12'
@@ -82,8 +83,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      mongo:
-        condition: service_healthy
 
   performance-seed:
     <<: *perf-app

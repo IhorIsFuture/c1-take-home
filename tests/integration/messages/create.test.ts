@@ -4,16 +4,21 @@ import { TestHttpClient } from '../../support/clients/http-client';
 import type { ApiErrorResponse } from '../../support/contracts/auth-contract';
 import type { MessageResponse } from '../../support/contracts/message-contract';
 import {
-  countStoredMessageBodies,
-  findStoredMessageBody
-} from '../../support/database/mongo-test-store';
-import { countStoredMessages, findStoredMessage } from '../../support/database/mysql-test-store';
+  countOutboxRows,
+  countStoredMessageBodyRows,
+  countStoredMessages,
+  findConversationSummary,
+  findOutboxRowByEventId,
+  findParticipantState,
+  findStoredMessage,
+  findStoredMessageBodyRow
+} from '../../support/database/mysql-test-store';
 import { buildCreateMessageInput } from '../../support/factories/message-factory';
 import { createConversationFixture } from '../../support/fixtures/conversation';
 import { createRegisteredUser } from '../../support/fixtures/registered-user';
 
 describe('POST /api/messages', () => {
-  it('persists consistent metadata and body data in MySQL and Mongo', async () => {
+  it('persists metadata, body, summary, read state and outbox atomically', async () => {
     const actor = await createRegisteredUser();
     const participant = await createRegisteredUser();
     const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
@@ -42,7 +47,11 @@ describe('POST /api/messages', () => {
       actor.auth.user.id,
       input.clientId
     );
-    const storedBody = await findStoredMessageBody(response.body.id);
+    const storedBody = await findStoredMessageBodyRow(response.body.id);
+    const summary = await findConversationSummary(conversation.id);
+    const outboxRow = await findOutboxRowByEventId(`message.created:${response.body.id}`);
+    const senderState = await findParticipantState(conversation.id, actor.auth.user.id);
+    const participantState = await findParticipantState(conversation.id, participant.auth.user.id);
 
     expect(storedMetadata).toMatchObject({
       id: response.body.id,
@@ -52,14 +61,31 @@ describe('POST /api/messages', () => {
       bodyHash: createHash('sha256').update(response.body.body).digest('hex')
     });
     expect(storedMetadata?.createdAt.toISOString()).toBe(response.body.createdAt);
-    expect(storedBody).toMatchObject({
-      _id: response.body.id,
-      conversationId: conversation.id,
-      senderId: actor.auth.user.id,
+    expect(storedBody).toEqual({
+      messageId: response.body.id,
       body: response.body.body
     });
-    expect(storedBody).not.toHaveProperty('signature');
-    expect(storedBody?.createdAt.toISOString()).toBe(response.body.createdAt);
+    expect(summary).toMatchObject({
+      conversationId: conversation.id,
+      lastMessageId: response.body.id,
+      lastSenderId: actor.auth.user.id,
+      lastMessagePreview: response.body.body
+    });
+    expect(summary?.lastMessageAt?.toISOString()).toBe(response.body.createdAt);
+    expect(outboxRow).toMatchObject({
+      eventType: 'message.created',
+      messageId: response.body.id,
+      conversationId: conversation.id,
+      status: 'published'
+    });
+    expect(senderState).toEqual({
+      lastReadMessageId: response.body.id,
+      unreadCount: 0
+    });
+    expect(participantState).toEqual({
+      lastReadMessageId: null,
+      unreadCount: 1
+    });
   });
 
   it.each([
@@ -97,7 +123,8 @@ describe('POST /api/messages', () => {
       expect.arrayContaining([expect.objectContaining({ field })])
     );
     expect(await countStoredMessages()).toBe(0);
-    expect(await countStoredMessageBodies()).toBe(0);
+    expect(await countStoredMessageBodyRows()).toBe(0);
+    expect(await countOutboxRows()).toBe(0);
   });
 
   it('requires authentication without writing data', async () => {
@@ -109,6 +136,6 @@ describe('POST /api/messages', () => {
     expect(response.status).toBe(401);
     expect(response.body.code).toBe('AUTHENTICATION_REQUIRED');
     expect(await countStoredMessages()).toBe(0);
-    expect(await countStoredMessageBodies()).toBe(0);
+    expect(await countStoredMessageBodyRows()).toBe(0);
   });
 });

@@ -51,6 +51,31 @@ export async function countStoredMessageBodies(): Promise<number> {
   return database.collection('message_bodies').countDocuments();
 }
 
+export async function insertStoredMessageBodies(
+  bodies: readonly StoredMessageBody[]
+): Promise<void> {
+  if (!bodies.length) return;
+
+  const database = (await getConnection()).db;
+
+  if (!database) throw new Error('Mongo test database is not connected');
+
+  await database.collection<StoredMessageBody>('message_bodies').insertMany([...bodies]);
+}
+
+export async function updateStoredMessageBody(
+  messageId: number,
+  patch: Partial<Omit<StoredMessageBody, '_id'>>
+): Promise<void> {
+  const database = (await getConnection()).db;
+
+  if (!database) throw new Error('Mongo test database is not connected');
+
+  await database
+    .collection<StoredMessageBody>('message_bodies')
+    .updateOne({ _id: messageId }, { $set: patch });
+}
+
 export async function closeMongoTestStore(): Promise<void> {
   if (!connection) return;
 

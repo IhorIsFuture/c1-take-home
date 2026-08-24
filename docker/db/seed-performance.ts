@@ -2,12 +2,16 @@ import bcrypt from 'bcrypt';
 import { Op } from 'sequelize';
 import { z } from 'zod';
 import { config } from '../../src/config';
-import { connectMongo, disconnectMongo } from '../../src/db/mongo';
 import { connectMysql, disconnectMysql, sequelize } from '../../src/db/mysql';
-import { MessageBodyModel, type MessageBody } from '../../src/models/message-body';
-import { Conversation, ConversationParticipant, Message, User } from '../../src/models/sql';
+import {
+  Conversation,
+  ConversationParticipant,
+  ConversationSummary,
+  Message,
+  MessageBody,
+  User
+} from '../../src/models/sql';
 import { hashMessageBody } from '../../src/services/message-body-hash';
-import { verifyMessageBodyHashes } from './message-body-hash-backfill';
 
 const performanceEnvironmentSchema = z
   .object({
@@ -59,25 +63,7 @@ function isPerformanceMysqlUrl(connectionUrl: string): boolean {
   );
 }
 
-function isPerformanceMongoUrl(connectionUrl: string): boolean {
-  const url = parseConnectionUrl(connectionUrl);
-
-  return !!(
-    url &&
-    url.protocol === 'mongodb:' &&
-    url.hostname === 'mongo' &&
-    url.port === '27017' &&
-    !url.username &&
-    !url.password &&
-    url.pathname === '/relay_perf'
-  );
-}
-
-if (
-  config.nodeEnv !== 'production' ||
-  !isPerformanceMysqlUrl(config.mysqlUrl) ||
-  !isPerformanceMongoUrl(config.mongoUrl)
-) {
+if (config.nodeEnv !== 'production' || !isPerformanceMysqlUrl(config.mysqlUrl)) {
   throw new Error('Performance seed must use isolated relay_perf databases');
 }
 
@@ -104,9 +90,7 @@ async function readPerformanceCounts() {
       where: { conversationId: { [Op.gte]: firstPerformanceId } }
     }),
     Message.count({ where: { id: { [Op.gte]: firstPerformanceId } } }),
-    MessageBodyModel.countDocuments({
-      _id: { $gte: firstPerformanceId }
-    })
+    MessageBody.count({ where: { messageId: { [Op.gte]: firstPerformanceId } } })
   ]);
 
   return { users, conversations, participants, messages, messageBodies };
@@ -136,10 +120,7 @@ async function seedPerformanceData(): Promise<void> {
   const existingCounts = await readPerformanceCounts();
 
   if (hasCompleteDataset(existingCounts)) {
-    const verification = await verifyMessageBodyHashes();
-    console.log(
-      JSON.stringify({ performanceDataset: existingCounts, verification, status: 'already-seeded' })
-    );
+    console.log(JSON.stringify({ performanceDataset: existingCounts, status: 'already-seeded' }));
     return;
   }
 
@@ -175,7 +156,7 @@ async function seedPerformanceData(): Promise<void> {
     ];
   });
   const messages: PerformanceMessage[] = [];
-  const messageBodies: MessageBody[] = [];
+  const messageBodies: { messageId: number; body: string }[] = [];
 
   for (let conversationIndex = 0; conversationIndex < conversationCount; conversationIndex++) {
     const conversation = conversations[conversationIndex];
@@ -199,15 +180,29 @@ async function seedPerformanceData(): Promise<void> {
         bodyHash: hashMessageBody(body),
         createdAt
       });
-      messageBodies.push({
-        _id: id,
-        conversationId: conversation.id,
-        senderId,
-        body,
-        createdAt
-      });
+      messageBodies.push({ messageId: id, body });
     }
   }
+
+  const lastMessageByConversationId = new Map<number, PerformanceMessage>();
+  const bodyByMessageId = new Map(messageBodies.map(body => [body.messageId, body.body]));
+
+  for (const message of messages) {
+    lastMessageByConversationId.set(message.conversationId, message);
+  }
+
+  const summaries = [...lastMessageByConversationId.values()].map(message => ({
+    conversationId: message.conversationId,
+    lastMessageId: message.id,
+    lastMessageAt: message.createdAt,
+    lastSenderId: message.senderId,
+    lastMessagePreview: (bodyByMessageId.get(message.id) ?? '').slice(0, 300)
+  }));
+  const readState = participants.map(participant => ({
+    conversationId: participant.conversationId,
+    userId: participant.userId,
+    lastReadMessageId: lastMessageByConversationId.get(participant.conversationId)?.id ?? null
+  }));
 
   await sequelize.transaction(async transaction => {
     await User.bulkCreate(users, { transaction });
@@ -217,30 +212,35 @@ async function seedPerformanceData(): Promise<void> {
     for (const messageBatch of chunk(messages)) {
       await Message.bulkCreate(messageBatch, { transaction });
     }
-  });
 
-  for (const messageBodyBatch of chunk(messageBodies)) {
-    await MessageBodyModel.insertMany(messageBodyBatch, { ordered: true });
-  }
+    for (const messageBodyBatch of chunk(messageBodies)) {
+      await MessageBody.bulkCreate(messageBodyBatch, { transaction });
+    }
+
+    await ConversationSummary.bulkCreate(summaries, { transaction });
+
+    for (const state of readState) {
+      await ConversationParticipant.update(
+        { lastReadMessageId: state.lastReadMessageId, unreadCount: 0 },
+        {
+          where: { conversationId: state.conversationId, userId: state.userId },
+          transaction
+        }
+      );
+    }
+  });
 
   const seededCounts = await readPerformanceCounts();
   if (!hasCompleteDataset(seededCounts)) {
     throw new Error('Performance dataset verification failed');
   }
 
-  const verification = await verifyMessageBodyHashes();
-  console.log(JSON.stringify({ performanceDataset: seededCounts, verification, status: 'seeded' }));
+  console.log(JSON.stringify({ performanceDataset: seededCounts, status: 'seeded' }));
 }
 
 try {
   await connectMysql();
-  await connectMongo();
-
-  try {
-    await seedPerformanceData();
-  } finally {
-    await disconnectMongo();
-  }
+  await seedPerformanceData();
 } finally {
   await disconnectMysql();
 }

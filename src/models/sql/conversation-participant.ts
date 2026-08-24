@@ -1,4 +1,11 @@
-import { DataTypes, InferAttributes, InferCreationAttributes, Model, Sequelize } from 'sequelize';
+import {
+  CreationOptional,
+  DataTypes,
+  InferAttributes,
+  InferCreationAttributes,
+  Model,
+  Sequelize
+} from 'sequelize';
 
 export class ConversationParticipant extends Model<
   InferAttributes<ConversationParticipant>,
@@ -6,6 +13,8 @@ export class ConversationParticipant extends Model<
 > {
   declare conversationId: number;
   declare userId: number;
+  declare lastReadMessageId: CreationOptional<number | null>;
+  declare unreadCount: CreationOptional<number>;
 }
 
 export function initializeConversationParticipantModel(
@@ -24,6 +33,18 @@ export function initializeConversationParticipantModel(
         allowNull: false,
         primaryKey: true,
         field: 'user_id'
+      },
+      lastReadMessageId: {
+        type: DataTypes.BIGINT.UNSIGNED,
+        allowNull: true,
+        defaultValue: null,
+        field: 'last_read_message_id'
+      },
+      unreadCount: {
+        type: DataTypes.INTEGER.UNSIGNED,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'unread_count'
       }
     },
     {

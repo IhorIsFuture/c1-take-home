@@ -1,15 +1,15 @@
 import { col, Op, type Transaction, where } from 'sequelize';
 import { Message } from '../../src/models/sql';
 import {
-  messageBodyRepository,
-  type MessageBodyRepository
-} from '../../src/repositories/message-body-repository';
+  legacyMessageBodyRepository,
+  type LegacyMessageBodyContent
+} from '../../src/legacy/legacy-message-body-repository';
 import { hashMessageBody } from '../../src/services/message-body-hash';
 
 const defaultBatchSize = 500;
 const missingBodyHash = where(col('body_hash'), Op.is, null);
 
-type StoredMessageBody = Awaited<ReturnType<MessageBodyRepository['findByIds']>>[number];
+type StoredMessageBody = LegacyMessageBodyContent;
 
 export interface MessageBodyHashBackfillResult {
   scanned: number;
@@ -43,7 +43,7 @@ function requireMatchingBody(
 }
 
 async function loadBodyById(messages: readonly Message[]): Promise<Map<number, StoredMessageBody>> {
-  const bodies = await messageBodyRepository.findByIds(messages.map(message => message.id));
+  const bodies = await legacyMessageBodyRepository.findByIds(messages.map(message => message.id));
   return new Map(bodies.map(body => [body._id, body]));
 }
 

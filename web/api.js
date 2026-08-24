@@ -155,8 +155,19 @@ export function createConversation(title, participantIds, clientId) {
   });
 }
 
-export function getMessages(conversationId, signal) {
-  return request(`/api/messages?conversationId=${encodeURIComponent(conversationId)}`, { signal });
+export function getMessages(conversationId, { beforeId, limit = 30 } = {}, signal) {
+  const search = new URLSearchParams({ limit: String(limit) });
+  if (beforeId) search.set('beforeId', String(beforeId));
+  return request(`/api/conversations/${encodeURIComponent(conversationId)}/messages?${search}`, {
+    signal
+  });
+}
+
+export function markConversationRead(conversationId, throughMessageId) {
+  return request(`/api/conversations/${encodeURIComponent(conversationId)}/read`, {
+    method: 'POST',
+    body: JSON.stringify({ throughMessageId })
+  });
 }
 
 export function createMessage(message) {

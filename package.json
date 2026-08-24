@@ -14,6 +14,8 @@
     "db:seed": "tsx docker/db/seed.ts",
     "db:seed:performance": "tsx docker/db/seed-performance.ts",
     "db:backfill:message-body-hashes": "tsx docker/db/run-message-body-hash-backfill.ts",
+    "db:backfill:message-bodies": "tsx docker/db/run-legacy-body-backfill.ts",
+    "db:verify:message-bodies": "tsx docker/db/run-legacy-body-verification.ts",
     "seed": "npm run db:seed",
     "test:env:start": "docker compose --project-name relay-test -f docker-compose.test.yml up --detach --build --scale api=2 --wait --wait-timeout 180",
     "test:env:up": "npm run test:env:down && npm run test:env:start",

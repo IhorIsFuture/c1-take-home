@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { TestHttpClient } from '../../support/clients/http-client';
 import { TestWebSocketClient } from '../../support/clients/websocket-client';
-import type { ApiErrorResponse } from '../../support/contracts/auth-contract';
 import type { MessageResponse } from '../../support/contracts/message-contract';
+import { findOutboxRowByEventId } from '../../support/database/mysql-test-store';
 import { startRedisTestService, stopRedisTestService } from '../../support/docker/test-service';
 import { createAccessTokenExpiringIn } from '../../support/factories/access-token-factory';
 import { buildCreateMessageInput } from '../../support/factories/message-factory';
@@ -98,7 +98,7 @@ describe('multi-instance realtime', () => {
     }
   });
 
-  it('requests state resynchronization after the Redis subscriber recovers', async () => {
+  it('keeps a committed write successful during a Redis outage and delivers it through the outbox after recovery', async () => {
     const actor = await createRegisteredUser(
       undefined,
       new TestHttpClient(testEnvironment.primaryBaseUrl)
@@ -126,15 +126,20 @@ describe('multi-instance realtime', () => {
       const input = buildCreateMessageInput(conversation.id, {
         body: 'Persisted while realtime was unavailable'
       });
-      const failedPublish = await new TestHttpClient(
+      const created = await new TestHttpClient(
         testEnvironment.secondaryBaseUrl
-      ).request<ApiErrorResponse>('/api/messages', {
+      ).request<MessageResponse>('/api/messages', {
         method: 'POST',
         accessToken: actor.auth.accessToken,
         json: input
       });
 
-      expect(failedPublish.status).toBe(500);
+      expect(created.status).toBe(201);
+      expect(created.body).toMatchObject({ conversationId: conversation.id, body: input.body });
+
+      const eventId = `message.created:${created.body.id}`;
+      const pendingRow = await findOutboxRowByEventId(eventId);
+      expect(pendingRow?.status).toBe('pending');
 
       const resyncRequired = participantSocket.waitForFrame(hasFrameType('resync_required'), 10000);
       await startRedisTestService();
@@ -145,24 +150,29 @@ describe('multi-instance realtime', () => {
         waitForReady(testEnvironment.secondaryBaseUrl)
       ]);
 
+      const deadline = Date.now() + 15000;
+      let publishedRow = await findOutboxRowByEventId(eventId);
+
+      while (publishedRow?.status !== 'published' && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        publishedRow = await findOutboxRowByEventId(eventId);
+      }
+
+      expect(publishedRow?.status).toBe('published');
+      expect(publishedRow?.attempts).toBeLessThanOrEqual(5);
+
       const messages = await actor.client.request<MessageResponse[]>(
-        `/api/messages?conversationId=${conversation.id}`,
+        `/api/conversations/${conversation.id}/messages`,
         { accessToken: actor.auth.accessToken }
       );
 
       expect(messages.status).toBe(200);
-      expect(messages.body).toEqual([
-        expect.objectContaining({
-          conversationId: conversation.id,
-          body: input.body
-        })
-      ]);
-      await participantSocket.expectNoFrame(isMessageFrame);
+      expect(messages.body).toEqual([created.body]);
     } finally {
       if (redisStopped) await startRedisTestService();
       await participantSocket.close();
     }
-  }, 30000);
+  }, 45000);
 
   it('closes an authenticated socket when its access token expires', async () => {
     const user = await createRegisteredUser();
