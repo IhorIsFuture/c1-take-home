@@ -56,13 +56,21 @@ function rememberSession(session) {
   return session;
 }
 
+function requestSessionRefresh() {
+  const refresh = () => rawRequest('/api/auth/refresh', { method: 'POST' }).then(rememberSession);
+
+  if (navigator.locks?.request) {
+    return navigator.locks.request('relay-session-refresh', refresh);
+  }
+
+  return refresh();
+}
+
 async function refreshAccessToken() {
   if (!refreshPromise) {
-    refreshPromise = rawRequest('/api/auth/refresh', { method: 'POST' })
-      .then(rememberSession)
-      .finally(() => {
-        refreshPromise = null;
-      });
+    refreshPromise = requestSessionRefresh().finally(() => {
+      refreshPromise = null;
+    });
   }
 
   return refreshPromise;

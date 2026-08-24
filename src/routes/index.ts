@@ -3,7 +3,7 @@ import { authenticate } from '../middleware/authenticate';
 import { notFoundHandler } from '../middleware/not-found-handler';
 import type { RateLimiter } from '../rate-limit/redis-rate-limiter';
 import type { RealtimePublisher } from '../realtime/index';
-import { authRouter } from './auth';
+import { createAuthRouter } from './auth';
 import { createConversationsRouter } from './conversations';
 import { createMessagesRouter } from './messages';
 import { searchRouter } from './search';
@@ -15,7 +15,7 @@ export function createApiRouter(
 ): Router {
   const apiRouter = Router();
 
-  apiRouter.use('/auth', authRouter);
+  apiRouter.use('/auth', createAuthRouter(rateLimiter));
   apiRouter.use(authenticate);
   apiRouter.use('/users', usersRouter);
   apiRouter.use('/conversations', createConversationsRouter(realtimePublisher));

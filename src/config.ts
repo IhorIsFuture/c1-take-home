@@ -30,7 +30,9 @@ const environmentSchema = z.object({
   OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(1).default(72),
   OUTBOX_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(1000).default(3600000),
   RATE_LIMIT_MESSAGE_CREATE_LIMIT: z.coerce.number().int().min(1).default(5),
-  RATE_LIMIT_MESSAGE_CREATE_WINDOW_SECONDS: z.coerce.number().int().min(1).default(10)
+  RATE_LIMIT_MESSAGE_CREATE_WINDOW_SECONDS: z.coerce.number().int().min(1).default(10),
+  RATE_LIMIT_AUTH_ATTEMPTS: z.coerce.number().int().min(1).default(10),
+  RATE_LIMIT_AUTH_WINDOW_SECONDS: z.coerce.number().int().min(1).default(60)
 });
 
 const environment = environmentSchema.parse(process.env);
@@ -113,6 +115,10 @@ export const config = {
     messageCreate: {
       limit: environment.RATE_LIMIT_MESSAGE_CREATE_LIMIT,
       windowSeconds: environment.RATE_LIMIT_MESSAGE_CREATE_WINDOW_SECONDS
+    },
+    auth: {
+      limit: environment.RATE_LIMIT_AUTH_ATTEMPTS,
+      windowSeconds: environment.RATE_LIMIT_AUTH_WINDOW_SECONDS
     }
   },
   auth: {

@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import { HttpError } from '../errors/http-error';
 import type { ValidatedHandler } from '../middleware/validate-request';
+import type { RateLimiter } from '../rate-limit/redis-rate-limiter';
 import { loginUser, logoutSession, refreshSession, registerUser } from '../services/auth';
 import {
   clearRefreshTokenCookie,
@@ -9,23 +10,21 @@ import {
 } from '../security/refresh-token';
 import type { LoginRequest, RegisterRequest } from '../validation/auth';
 
-export const registerHandler: ValidatedHandler<RegisterRequest> = async (
-  { body: { name, email, password } },
-  { response }
-) => {
-  const result = await registerUser(name, email, password);
-  setRefreshTokenCookie(response, result.refreshToken);
-  response.status(201).json({ user: result.user, accessToken: result.accessToken });
-};
+export function registerHandler(rateLimiter: RateLimiter): ValidatedHandler<RegisterRequest> {
+  return async ({ body: { name, email, password } }, { response }) => {
+    const result = await registerUser(name, email, password, rateLimiter);
+    setRefreshTokenCookie(response, result.refreshToken);
+    response.status(201).json({ user: result.user, accessToken: result.accessToken });
+  };
+}
 
-export const loginHandler: ValidatedHandler<LoginRequest> = async (
-  { body: { email, password } },
-  { response }
-) => {
-  const result = await loginUser(email, password);
-  setRefreshTokenCookie(response, result.refreshToken);
-  response.json({ user: result.user, accessToken: result.accessToken });
-};
+export function loginHandler(rateLimiter: RateLimiter): ValidatedHandler<LoginRequest> {
+  return async ({ body: { email, password } }, { response }) => {
+    const result = await loginUser(email, password, rateLimiter);
+    setRefreshTokenCookie(response, result.refreshToken);
+    response.json({ user: result.user, accessToken: result.accessToken });
+  };
+}
 
 export const refreshHandler: RequestHandler = async (request, response) => {
   const refreshToken = readRefreshToken(request);
@@ -40,7 +39,10 @@ export const refreshHandler: RequestHandler = async (request, response) => {
     setRefreshTokenCookie(response, result.refreshToken);
     response.json({ user: result.user, accessToken: result.accessToken });
   } catch (error) {
-    clearRefreshTokenCookie(response);
+    if (error instanceof HttpError && error.statusCode === 401) {
+      clearRefreshTokenCookie(response);
+    }
+
     throw error;
   }
 };

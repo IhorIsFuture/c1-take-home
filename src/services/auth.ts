@@ -1,6 +1,9 @@
 import { UniqueConstraintError, type Transaction } from 'sequelize';
+import { config } from '../config';
 import { sequelize } from '../db/mysql';
 import { HttpError } from '../errors/http-error';
+import { RateLimitError } from '../errors/rate-limit-error';
+import type { RateLimiter } from '../rate-limit/redis-rate-limiter';
 import { authSessionRepository } from '../repositories/auth-session-repository';
 import { userRepository, type PublicUser } from '../repositories/user-repository';
 import { createAccessToken } from '../security/access-token';
@@ -37,11 +40,28 @@ function invalidCredentials(): HttpError {
   return new HttpError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
 }
 
+async function requireAuthAttempt(
+  rateLimiter: RateLimiter,
+  action: string,
+  email: string
+): Promise<void> {
+  const decision = await rateLimiter.consume(
+    `auth:${action}:${email.trim().toLowerCase()}`,
+    config.rateLimit.auth
+  );
+
+  if (!decision.allowed) {
+    throw new RateLimitError('Too many attempts, try again later', decision.retryAfterSeconds);
+  }
+}
+
 export async function registerUser(
   name: string,
   email: string,
-  password: string
+  password: string,
+  rateLimiter: RateLimiter
 ): Promise<AuthResult> {
+  await requireAuthAttempt(rateLimiter, 'register', email);
   const passwordHash = await hashPassword(password);
 
   try {
@@ -62,7 +82,12 @@ export async function registerUser(
   }
 }
 
-export async function loginUser(email: string, password: string): Promise<AuthResult> {
+export async function loginUser(
+  email: string,
+  password: string,
+  rateLimiter: RateLimiter
+): Promise<AuthResult> {
+  await requireAuthAttempt(rateLimiter, 'login', email);
   const user = await userRepository.findByNormalizedEmail(email);
 
   if (!user) {
