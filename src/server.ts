@@ -6,6 +6,7 @@ import { createApp } from './app';
 import { config } from './config';
 import { connectMysql, disconnectMysql, isMysqlReady } from './db/mysql';
 import { OutboxRelay } from './outbox/outbox-relay';
+import { RedisRateLimiter } from './rate-limit/redis-rate-limiter';
 import { RedisRealtimePubSub } from './realtime/index';
 import { verifyAccessToken } from './security/access-token';
 import { attachWs } from './ws/hub';
@@ -131,6 +132,7 @@ async function stopResources(
   webSocketServer: WebSocketServer,
   realtimePubSub: RedisRealtimePubSub,
   outboxRelay: OutboxRelay,
+  rateLimiter: RedisRateLimiter,
   connections: { mysql: boolean; redis: boolean }
 ): Promise<void> {
   await outboxRelay.stop();
@@ -139,7 +141,8 @@ async function stopResources(
     closeWebSocketServer(webSocketServer)
   ]);
   const realtimeResults = await Promise.allSettled([
-    ...(connections.redis ? [realtimePubSub.close()] : [])
+    ...(connections.redis ? [realtimePubSub.close()] : []),
+    rateLimiter.close()
   ]);
   const databaseResults = await Promise.allSettled([
     ...(connections.mysql ? [disconnectMysql()] : [])
@@ -164,8 +167,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     onSubscriberRecovered: () => broadcast({ type: 'resync_required' })
   });
   const outboxRelay = new OutboxRelay(realtimePubSub, config.outbox);
+  const rateLimiter = new RedisRateLimiter({
+    url: config.redisUrl,
+    namespace: config.redisNamespace
+  });
   const app = createApp({
     realtimePublisher: realtimePubSub,
+    rateLimiter,
     checkReadiness: async () => {
       if (!ready) return false;
 
@@ -184,6 +192,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     await connectMysql();
     connections.mysql = true;
 
+    await rateLimiter.start();
     await realtimePubSub.start(({ recipientUserIds, event }) => {
       if (event.type !== 'message.created') return;
       deliver(recipientUserIds, { type: 'message', ...event.message });
@@ -206,6 +215,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
           webSocketServer,
           realtimePubSub,
           outboxRelay,
+          rateLimiter,
           connections
         );
         return stopPromise;
@@ -213,9 +223,14 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     };
   } catch (error) {
     ready = false;
-    await stopResources(server, webSocketServer, realtimePubSub, outboxRelay, connections).catch(
-      () => undefined
-    );
+    await stopResources(
+      server,
+      webSocketServer,
+      realtimePubSub,
+      outboxRelay,
+      rateLimiter,
+      connections
+    ).catch(() => undefined);
     throw error;
   }
 }

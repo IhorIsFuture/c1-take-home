@@ -10,6 +10,7 @@ import {
   findParticipantState
 } from '../../support/database/mysql-test-store';
 import { buildCreateMessageInput } from '../../support/factories/message-factory';
+import { allowAllRateLimiter } from '../../support/factories/rate-limiter-factory';
 import { createConversationFixture } from '../../support/fixtures/conversation';
 import { createRegisteredUser } from '../../support/fixtures/registered-user';
 
@@ -31,7 +32,8 @@ describe('createMessage transaction atomicity', () => {
       createMessage(
         actor.auth.user.id,
         { conversationId: conversation.id, body: input.body, clientId: input.clientId },
-        { publish }
+        { publish },
+        allowAllRateLimiter
       )
     ).rejects.toThrow('body insert failed');
 
@@ -59,7 +61,8 @@ describe('createMessage transaction atomicity', () => {
     const result = await createMessage(
       actor.auth.user.id,
       { conversationId: conversation.id, body: input.body, clientId: input.clientId },
-      { publish }
+      { publish },
+      allowAllRateLimiter
     );
 
     expect(result.created).toBe(true);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiErrorResponse } from '../../support/contracts/auth-contract';
 import type { MessageResponse } from '../../support/contracts/message-contract';
+import { seedStoredMessages } from '../../support/database/mysql-test-store';
 import { buildCreateMessageInput } from '../../support/factories/message-factory';
 import { createConversationFixture } from '../../support/fixtures/conversation';
 import { createRegisteredUser } from '../../support/fixtures/registered-user';
@@ -30,9 +31,11 @@ describe('message history pagination', () => {
     const participant = await createRegisteredUser();
     const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
 
-    for (let index = 0; index < 35; index += 1) {
-      await sendMessage(actor, conversation.id, `Message ${index + 1}`);
-    }
+    await seedStoredMessages(
+      conversation.id,
+      actor.auth.user.id,
+      Array.from({ length: 35 }, (_, index) => `Message ${index + 1}`)
+    );
 
     const defaultPage = await actor.client.request<MessageResponse[]>(
       `/api/conversations/${conversation.id}/messages`,
@@ -60,11 +63,11 @@ describe('message history pagination', () => {
     const actor = await createRegisteredUser();
     const participant = await createRegisteredUser();
     const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
-    const sent: MessageResponse[] = [];
-
-    for (let index = 0; index < 25; index += 1) {
-      sent.push(await sendMessage(actor, conversation.id, `Paged ${index + 1}`));
-    }
+    const sentIds = await seedStoredMessages(
+      conversation.id,
+      actor.auth.user.id,
+      Array.from({ length: 25 }, (_, index) => `Paged ${index + 1}`)
+    );
 
     const collected: MessageResponse[] = [];
     let beforeId: number | undefined;
@@ -87,27 +90,25 @@ describe('message history pagination', () => {
       if (page.body.length < 10) break;
     }
 
-    expect(collected.map(message => message.id)).toEqual(sent.map(message => message.id));
+    expect(collected.map(message => message.id)).toEqual(sentIds);
   });
 
   it('keeps pages stable while new messages arrive between requests', async () => {
     const actor = await createRegisteredUser();
     const participant = await createRegisteredUser();
     const { conversation } = await createConversationFixture(actor, [participant.auth.user.id]);
-    const sent: MessageResponse[] = [];
-
-    for (let index = 0; index < 12; index += 1) {
-      sent.push(await sendMessage(actor, conversation.id, `Stable ${index + 1}`));
-    }
+    const sentIds = await seedStoredMessages(
+      conversation.id,
+      actor.auth.user.id,
+      Array.from({ length: 12 }, (_, index) => `Stable ${index + 1}`)
+    );
 
     const firstPage = await actor.client.request<MessageResponse[]>(
       `/api/conversations/${conversation.id}/messages?limit=5`,
       { accessToken: actor.auth.accessToken }
     );
 
-    expect(firstPage.body.map(message => message.id)).toEqual(
-      sent.slice(7).map(message => message.id)
-    );
+    expect(firstPage.body.map(message => message.id)).toEqual(sentIds.slice(7));
 
     await sendMessage(participant, conversation.id, 'Concurrent newcomer');
 
@@ -116,9 +117,7 @@ describe('message history pagination', () => {
       { accessToken: actor.auth.accessToken }
     );
 
-    expect(secondPage.body.map(message => message.id)).toEqual(
-      sent.slice(2, 7).map(message => message.id)
-    );
+    expect(secondPage.body.map(message => message.id)).toEqual(sentIds.slice(2, 7));
 
     const seen = new Set(firstPage.body.map(message => message.id));
     for (const message of secondPage.body) {
