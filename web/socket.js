@@ -4,6 +4,7 @@ export function createRelaySocket({
   onAuthenticationFailed,
   onMessage,
   onTyping,
+  onConversationCreated,
   onResyncRequired,
   onStatus
 }) {
@@ -114,6 +115,11 @@ export function createRelaySocket({
 
       if (message.type === 'typing') {
         onTyping?.(message);
+        return;
+      }
+
+      if (message.type === 'conversation_created') {
+        onConversationCreated?.(message);
         return;
       }
 

@@ -210,6 +210,21 @@ function resetApplicationState() {
   elements.text.value = '';
 }
 
+function connectRealtime() {
+  relaySocket?.close();
+  relaySocket = createRelaySocket({
+    getAccessToken,
+    refreshAccessToken: restoreSession,
+    onAuthenticationFailed: () => leaveApplication('Your session expired. Please sign in again.'),
+    onMessage: receiveMessage,
+    onTyping: receiveTypingEvent,
+    onConversationCreated: receiveConversationCreated,
+    onResyncRequired: resyncRealtimeState,
+    onStatus: renderConnectionStatus
+  });
+  relaySocket.connect();
+}
+
 async function enterApplication(user) {
   state.user = user;
   resetApplicationState();
@@ -219,17 +234,7 @@ async function enterApplication(user) {
   elements.profileEmail.textContent = user.email;
   renderAvatar(elements.profileAvatar, user.name);
 
-  relaySocket?.close();
-  relaySocket = createRelaySocket({
-    getAccessToken,
-    refreshAccessToken: restoreSession,
-    onAuthenticationFailed: () => leaveApplication('Your session expired. Please sign in again.'),
-    onMessage: receiveMessage,
-    onTyping: receiveTypingEvent,
-    onResyncRequired: resyncRealtimeState,
-    onStatus: renderConnectionStatus
-  });
-  relaySocket.connect();
+  connectRealtime();
   await loadConversations();
 }
 
@@ -759,11 +764,13 @@ function mergeUnreadState(conversations) {
 }
 
 async function loadConversations({ openId } = {}) {
+  const userId = state.user?.id;
   state.loadingConversations = true;
   renderConversations();
 
   try {
     const conversations = await getConversations();
+    if (state.user?.id !== userId) return;
     state.conversations = mergeUnreadState(conversations);
     state.loadingConversations = false;
     renderConversations();
@@ -807,9 +814,6 @@ async function openConversation(id, title) {
   state.hasMoreMessages = false;
   clearTypingUsers();
 
-  const conversation = getActiveConversation();
-  if (conversation) conversation.unreadCount = 0;
-
   elements.app.classList.add('is-chat-open');
   renderConversations();
   renderHeader();
@@ -831,6 +835,11 @@ async function openConversation(id, title) {
     state.messages = [...merged.values()].sort((left, right) => left.id - right.id);
     for (const message of state.messages) state.seenMessageIds.add(message.id);
     state.loadingMessages = false;
+
+    const conversation = getActiveConversation();
+    if (conversation) conversation.unreadCount = 0;
+
+    renderConversations();
     renderHeader();
     setComposerAvailability();
     renderMessages();
@@ -921,6 +930,18 @@ async function loadEarlierMessages() {
   }
 }
 
+function receiveConversationCreated(event) {
+  if (state.conversations.some(conversation => conversation.id === event.id)) return;
+
+  state.conversations.push({
+    id: event.id,
+    title: event.title,
+    lastMessage: null,
+    unreadCount: 0
+  });
+  renderConversations();
+}
+
 function receiveMessage(message) {
   if (state.seenMessageIds.has(message.id)) return;
   state.seenMessageIds.add(message.id);
@@ -965,12 +986,15 @@ function receiveMessage(message) {
     markConversationReadOnServer(message.conversationId, message.id);
   }
 
-  if (message.conversationId === state.activeConversationId && state.view === 'conversation') {
+  if (message.conversationId === state.activeConversationId) {
     state.messages.push(message);
     state.messages.sort((left, right) => left.id - right.id);
-    state.loadingMessages = false;
-    renderMessages();
-    renderHeader();
+
+    if (state.view === 'conversation') {
+      state.loadingMessages = false;
+      renderMessages();
+      renderHeader();
+    }
   }
 
   renderConversations();
@@ -1359,6 +1383,11 @@ elements.authSwitch.addEventListener('click', () => {
 elements.logoutButton.addEventListener('click', signOut);
 
 onSessionExpired(() => leaveApplication('Your session expired. Please sign in again.'));
-window.addEventListener('beforeunload', () => relaySocket?.close());
+window.addEventListener('pagehide', () => relaySocket?.close());
+window.addEventListener('pageshow', event => {
+  if (!event.persisted || !state.user) return;
+  connectRealtime();
+  void resyncRealtimeState();
+});
 
 void bootstrap();
