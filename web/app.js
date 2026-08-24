@@ -93,7 +93,9 @@ const state = {
   pendingConversation: null,
   pendingRealtimeMessages: new Map(),
   conversationRefreshPromise: null,
-  realtimeResyncPromise: null
+  realtimeResyncPromise: null,
+  typingUsers: new Map(),
+  lastTypingSentAt: 0
 };
 
 let relaySocket = null;
@@ -201,6 +203,8 @@ function resetApplicationState() {
   state.pendingRealtimeMessages.clear();
   state.conversationRefreshPromise = null;
   state.realtimeResyncPromise = null;
+  clearTypingUsers();
+  state.lastTypingSentAt = 0;
   elements.app.classList.remove('is-chat-open');
   elements.search.value = '';
   elements.text.value = '';
@@ -221,6 +225,7 @@ async function enterApplication(user) {
     refreshAccessToken: restoreSession,
     onAuthenticationFailed: () => leaveApplication('Your session expired. Please sign in again.'),
     onMessage: receiveMessage,
+    onTyping: receiveTypingEvent,
     onResyncRequired: resyncRealtimeState,
     onStatus: renderConnectionStatus
   });
@@ -592,6 +597,48 @@ function renderMessages({ preserveScroll = false } = {}) {
   });
 }
 
+function clearTypingUsers() {
+  for (const typing of state.typingUsers.values()) clearTimeout(typing.timer);
+  state.typingUsers.clear();
+}
+
+function typingStatusText() {
+  const names = [...state.typingUsers.values()].map(typing => typing.name);
+
+  if (!names.length) return '';
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return 'Several people are typing…';
+}
+
+function receiveTypingEvent(event) {
+  if (event.conversationId !== state.activeConversationId || state.view !== 'conversation') return;
+  if (event.userId === state.user?.id) return;
+
+  const existing = state.typingUsers.get(event.userId);
+  if (existing) clearTimeout(existing.timer);
+
+  state.typingUsers.set(event.userId, {
+    name: event.userName,
+    timer: setTimeout(() => {
+      state.typingUsers.delete(event.userId);
+      renderHeader();
+    }, 4000)
+  });
+  renderHeader();
+}
+
+function notifyTyping() {
+  if (!state.activeConversationId || state.view !== 'conversation') return;
+  if (!elements.text.value.trim()) return;
+
+  const now = Date.now();
+  if (now - state.lastTypingSentAt < 2500) return;
+
+  state.lastTypingSentAt = now;
+  relaySocket?.sendTyping(state.activeConversationId);
+}
+
 function renderHeader() {
   if (state.view === 'search') {
     elements.title.textContent = 'Search results';
@@ -614,10 +661,14 @@ function renderHeader() {
     conversation?.title ??
     state.activeConversationTitle ??
     `Conversation #${state.activeConversationId}`;
+  const typingText = typingStatusText();
+
   elements.title.textContent = title;
-  elements.chatStatus.textContent = conversation?.lastMessage
-    ? `Last activity ${formatActivity(conversation.lastMessage.createdAt)}`
-    : 'No messages yet';
+  elements.chatStatus.textContent =
+    typingText ||
+    (conversation?.lastMessage
+      ? `Last activity ${formatActivity(conversation.lastMessage.createdAt)}`
+      : 'No messages yet');
   renderAvatar(elements.chatAvatar, title);
 }
 
@@ -754,6 +805,7 @@ async function openConversation(id, title) {
   state.loadingMessages = true;
   state.messages = [];
   state.hasMoreMessages = false;
+  clearTypingUsers();
 
   const conversation = getActiveConversation();
   if (conversation) conversation.unreadCount = 0;
@@ -887,6 +939,15 @@ function receiveMessage(message) {
     message.conversationId === state.activeConversationId &&
     state.view === 'conversation' &&
     (!mobileViewport.matches || elements.app.classList.contains('is-chat-open'));
+
+  if (message.conversationId === state.activeConversationId) {
+    const typing = state.typingUsers.get(message.senderId);
+
+    if (typing) {
+      clearTimeout(typing.timer);
+      state.typingUsers.delete(message.senderId);
+    }
+  }
 
   conversation.lastMessage = {
     id: message.id,
@@ -1236,6 +1297,7 @@ elements.messages.addEventListener('scroll', maybeLoadEarlierMessages);
 elements.composer.addEventListener('submit', submitMessage);
 elements.text.addEventListener('input', () => {
   if (state.pendingMessage?.body !== elements.text.value.trim()) state.pendingMessage = null;
+  notifyTyping();
   resizeComposer();
   setComposerAvailability();
 });

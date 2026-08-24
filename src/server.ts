@@ -9,6 +9,7 @@ import { OutboxRelay } from './outbox/outbox-relay';
 import { RedisRateLimiter } from './rate-limit/redis-rate-limiter';
 import { RedisRealtimePubSub } from './realtime/index';
 import { verifyAccessToken } from './security/access-token';
+import { broadcastTyping } from './services/typing';
 import { attachWs } from './ws/hub';
 
 const shutdownGracePeriodMs = 5000;
@@ -159,7 +160,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   let dependencyReadinessCheck: Promise<boolean> | undefined;
   const connections = { mysql: false, redis: false };
   const server = http.createServer();
-  const { webSocketServer, deliver, broadcast } = attachWs(server, { verifyAccessToken });
+  const { webSocketServer, deliver, broadcast } = attachWs(server, {
+    verifyAccessToken,
+    onTyping: (userId, conversationId) => broadcastTyping(userId, conversationId, realtimePubSub)
+  });
   const realtimePubSub = new RedisRealtimePubSub({
     url: config.redisUrl,
     namespace: config.redisNamespace,
@@ -194,7 +198,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
 
     await rateLimiter.start();
     await realtimePubSub.start(({ recipientUserIds, event }) => {
-      if (event.type !== 'message.created') return;
+      if (event.type === 'typing') {
+        deliver(recipientUserIds, { type: 'typing', ...event.typing });
+        return;
+      }
+
       deliver(recipientUserIds, { type: 'message', ...event.message });
     });
     connections.redis = true;

@@ -3,6 +3,7 @@ export function createRelaySocket({
   refreshAccessToken,
   onAuthenticationFailed,
   onMessage,
+  onTyping,
   onResyncRequired,
   onStatus
 }) {
@@ -13,6 +14,7 @@ export function createRelaySocket({
   let authenticationRecoveryAttempted = false;
   let recoveringAuthentication = false;
   let hasAuthenticated = false;
+  let authenticatedNow = false;
   let stopped = false;
 
   function scheduleReconnect() {
@@ -83,6 +85,7 @@ export function createRelaySocket({
       if (message.type === 'authenticated') {
         const reconnected = hasAuthenticated;
         hasAuthenticated = true;
+        authenticatedNow = true;
         authenticationRecoveryAttempted = false;
         reconnectAttempt = 0;
         onStatus('online');
@@ -104,8 +107,13 @@ export function createRelaySocket({
       if (message.type === 'auth_error') {
         authenticationFailed = true;
         onStatus('offline');
-        nextSocket.close(1008, 'Authentication failed');
+        nextSocket.close(4000, 'Authentication failed');
         void recoverAuthentication();
+        return;
+      }
+
+      if (message.type === 'typing') {
+        onTyping?.(message);
         return;
       }
 
@@ -116,16 +124,23 @@ export function createRelaySocket({
     nextSocket.onclose = () => {
       if (socket !== nextSocket) return;
       socket = undefined;
+      authenticatedNow = false;
       scheduleReconnect();
     };
   }
 
+  function sendTyping(conversationId) {
+    if (!authenticatedNow || socket?.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: 'typing', conversationId }));
+  }
+
   function close() {
     stopped = true;
+    authenticatedNow = false;
     clearTimeout(reconnectTimer);
     socket?.close();
     socket = undefined;
   }
 
-  return { connect, close };
+  return { connect, close, sendTyping };
 }

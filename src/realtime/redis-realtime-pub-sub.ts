@@ -1,8 +1,8 @@
 import { createClient } from 'redis';
 import { z } from 'zod';
 import type {
-  MessageCreatedEvent,
   RealtimeDelivery,
+  RealtimeEvent,
   RealtimeListener,
   RealtimePublisher
 } from './realtime-publisher';
@@ -16,25 +16,40 @@ end
 return 0
 `;
 
-const messageCreatedEnvelopeSchema = z
+const messageCreatedEventSchema = z
+  .object({
+    type: z.literal('message.created'),
+    message: z
+      .object({
+        id: z.number().int().positive(),
+        conversationId: z.number().int().positive(),
+        senderId: z.number().int().positive(),
+        senderName: z.string().min(1),
+        body: z.string(),
+        createdAt: z.iso.datetime()
+      })
+      .strict()
+  })
+  .strict();
+
+const typingEventSchema = z
+  .object({
+    type: z.literal('typing'),
+    typing: z
+      .object({
+        conversationId: z.number().int().positive(),
+        userId: z.number().int().positive(),
+        userName: z.string().min(1)
+      })
+      .strict()
+  })
+  .strict();
+
+const realtimeEnvelopeSchema = z
   .object({
     version: z.literal(1),
     recipientUserIds: z.array(z.number().int().positive()).min(1),
-    event: z
-      .object({
-        type: z.literal('message.created'),
-        message: z
-          .object({
-            id: z.number().int().positive(),
-            conversationId: z.number().int().positive(),
-            senderId: z.number().int().positive(),
-            senderName: z.string().min(1),
-            body: z.string(),
-            createdAt: z.iso.datetime()
-          })
-          .strict()
-      })
-      .strict()
+    event: z.discriminatedUnion('type', [messageCreatedEventSchema, typingEventSchema])
   })
   .strict();
 
@@ -58,7 +73,11 @@ function serializeDelivery(delivery: RealtimeDelivery): string {
 }
 
 function parseDelivery(message: string): RealtimeDelivery {
-  const envelope = messageCreatedEnvelopeSchema.parse(JSON.parse(message));
+  const envelope = realtimeEnvelopeSchema.parse(JSON.parse(message));
+
+  if (envelope.event.type === 'typing') {
+    return { recipientUserIds: envelope.recipientUserIds, event: envelope.event };
+  }
 
   return {
     recipientUserIds: envelope.recipientUserIds,
@@ -115,12 +134,17 @@ export class RedisRealtimePubSub implements RealtimePublisher {
     return this.startPromise;
   }
 
-  async publish(event: MessageCreatedEvent, recipientUserIds: readonly number[]): Promise<void> {
+  async publish(event: RealtimeEvent, recipientUserIds: readonly number[]): Promise<void> {
     const uniqueRecipientUserIds = [...new Set(recipientUserIds)];
     if (!uniqueRecipientUserIds.length) return;
     if (!this.publisher.isReady) throw new Error('Redis realtime publisher is not ready');
 
     const delivery = serializeDelivery({ event, recipientUserIds: uniqueRecipientUserIds });
+
+    if (event.type === 'typing') {
+      await this.publisher.publish(this.channel, delivery);
+      return;
+    }
 
     await this.publisher.eval(publishOnceScript, {
       keys: [`${this.eventKeyPrefix}:${event.type}:${event.message.id}`],

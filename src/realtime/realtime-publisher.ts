@@ -12,13 +12,26 @@ export interface MessageCreatedEvent {
   message: RealtimeMessage;
 }
 
+export interface TypingEventPayload {
+  conversationId: number;
+  userId: number;
+  userName: string;
+}
+
+export interface TypingEvent {
+  type: 'typing';
+  typing: TypingEventPayload;
+}
+
+export type RealtimeEvent = MessageCreatedEvent | TypingEvent;
+
 export interface RealtimeDelivery {
   recipientUserIds: readonly number[];
-  event: MessageCreatedEvent;
+  event: RealtimeEvent;
 }
 
 export type RealtimeListener = (delivery: RealtimeDelivery) => void | Promise<void>;
 
 export interface RealtimePublisher {
-  publish(event: MessageCreatedEvent, recipientUserIds: readonly number[]): Promise<void>;
+  publish(event: RealtimeEvent, recipientUserIds: readonly number[]): Promise<void>;
 }
